@@ -13,17 +13,17 @@ Documentos de referencia obligatorios:
 
 ## 2. Tecnologias
 
-| Area | Decision |
-| --- | --- |
-| Runtime | Node.js LTS. |
-| Framework | NestJS con TypeScript. |
-| ORM | Prisma 7. |
-| Base de datos | PostgreSQL. |
-| WebAuthn | `@simplewebauthn/server`. |
-| Google | Validacion OIDC server-side. |
-| Email | `EmailProvider` con implementacion SMTP. |
-| Sesiones | Cookies con tokens opacos server-side. |
-| Tests | Jest/Vitest para unidades e integracion. |
+| Area          | Decision                                 |
+| ------------- | ---------------------------------------- |
+| Runtime       | Node.js LTS.                             |
+| Framework     | NestJS con TypeScript.                   |
+| ORM           | Prisma 7.                                |
+| Base de datos | PostgreSQL.                              |
+| WebAuthn      | `@simplewebauthn/server`.                |
+| Google        | Validacion OIDC server-side.             |
+| Email         | `EmailProvider` con implementacion SMTP. |
+| Sesiones      | Cookies con tokens opacos server-side.   |
+| Tests         | Jest/Vitest para unidades e integracion. |
 
 ## 3. Estructura de modulos
 
@@ -92,65 +92,70 @@ Prefijo global: `/api`. Todas las respuestas JSON usan una forma consistente:
 Los errores publicos usan:
 
 ```json
-{ "error": { "code": "STEP_UP_REQUIRED", "message": "Verify it is you to continue." } }
+{
+  "error": {
+    "code": "STEP_UP_REQUIRED",
+    "message": "Verify it is you to continue."
+  }
+}
 ```
 
 No se devuelve informacion que confirme si un email, usuario o identidad existe cuando el flujo es publico.
 
 ### Rutas publicas
 
-| Metodo y ruta | Funcion |
-| --- | --- |
-| `POST /api/auth/passkey/registration/options` | Crea challenge para registro inicial con `displayName`. |
-| `POST /api/auth/passkey/registration/verify` | Verifica registro, crea User, credencial y sesion. |
-| `POST /api/auth/passkey/authentication/options` | Crea challenge discoverable de login. |
-| `POST /api/auth/passkey/authentication/verify` | Verifica assertion y crea sesion. |
-| `GET /api/auth/google/start` | Crea OAuthTransaction y redirige a Google. |
-| `GET /api/auth/google/callback` | Consume transaccion, valida OIDC y redirige a frontend. |
-| `POST /api/auth/logout` | Revoca sesion actual y limpia cookie. |
-| `GET /api/auth/me` | Devuelve usuario autenticado y estado basico. |
+| Metodo y ruta                                   | Funcion                                                 |
+| ----------------------------------------------- | ------------------------------------------------------- |
+| `POST /api/auth/passkey/registration/options`   | Crea challenge para registro inicial con `displayName`. |
+| `POST /api/auth/passkey/registration/verify`    | Verifica registro, crea User, credencial y sesion.      |
+| `POST /api/auth/passkey/authentication/options` | Crea challenge discoverable de login.                   |
+| `POST /api/auth/passkey/authentication/verify`  | Verifica assertion y crea sesion.                       |
+| `GET /api/auth/google/start`                    | Crea OAuthTransaction y redirige a Google.              |
+| `GET /api/auth/google/callback`                 | Consume transaccion, valida OIDC y redirige a frontend. |
+| `POST /api/auth/logout`                         | Revoca sesion actual y limpia cookie.                   |
+| `GET /api/auth/me`                              | Devuelve usuario autenticado y estado basico.           |
 
 ### Step-up y metodos de inicio
 
-| Metodo y ruta | Funcion |
-| --- | --- |
-| `POST /api/step-up/passkey/options` | Challenge de passkey ligado a sesion. |
-| `POST /api/step-up/passkey/verify` | Marca `stepUpExpiresAt`. |
-| `GET /api/step-up/google/start` | OAuthTransaction ligada a sesion. |
-| `GET /api/step-up/google/callback` | Verifica Google y marca step-up. |
-| `GET /api/security/passkeys` | Lista passkeys. |
-| `POST /api/security/passkeys/options` | Challenge para agregar passkey; requiere step-up. |
-| `POST /api/security/passkeys/verify` | Persiste passkey; requiere step-up. |
-| `PATCH /api/security/passkeys/:id` | Renombra passkey; requiere step-up. |
-| `DELETE /api/security/passkeys/:id` | Elimina passkey si queda metodo valido; requiere step-up. |
-| `GET /api/security/google` | Devuelve estado Google. |
-| `GET /api/security/google/connect` | Inicia linking; requiere step-up. |
-| `GET /api/security/google/callback` | Vincula si el `sub` no es de otro User. |
-| `DELETE /api/security/google` | Desvincula si queda metodo valido; requiere step-up. |
+| Metodo y ruta                         | Funcion                                                   |
+| ------------------------------------- | --------------------------------------------------------- |
+| `POST /api/step-up/passkey/options`   | Challenge de passkey ligado a sesion.                     |
+| `POST /api/step-up/passkey/verify`    | Marca `stepUpExpiresAt`.                                  |
+| `GET /api/step-up/google/start`       | OAuthTransaction ligada a sesion.                         |
+| `GET /api/step-up/google/callback`    | Verifica Google y marca step-up.                          |
+| `GET /api/security/passkeys`          | Lista passkeys.                                           |
+| `POST /api/security/passkeys/options` | Challenge para agregar passkey; requiere step-up.         |
+| `POST /api/security/passkeys/verify`  | Persiste passkey; requiere step-up.                       |
+| `PATCH /api/security/passkeys/:id`    | Renombra passkey; requiere step-up.                       |
+| `DELETE /api/security/passkeys/:id`   | Elimina passkey si queda metodo valido; requiere step-up. |
+| `GET /api/security/google`            | Devuelve estado Google.                                   |
+| `GET /api/security/google/connect`    | Inicia linking; requiere step-up.                         |
+| `GET /api/security/google/callback`   | Vincula si el `sub` no es de otro User.                   |
+| `DELETE /api/security/google`         | Desvincula si queda metodo valido; requiere step-up.      |
 
 ### Recovery y sesiones
 
-| Metodo y ruta | Funcion |
-| --- | --- |
-| `GET /api/security/recovery` | Estado enmascarado de recovery. |
-| `POST /api/security/recovery-email/start` | Crea challenge de verificacion OTP o Magic Link; requiere step-up. |
-| `POST /api/security/recovery-email/verify-otp` | Consume OTP y guarda/cambia correo. |
-| `GET /api/security/recovery-email/verify-link` | Consume Magic Link y guarda/cambia correo. |
-| `DELETE /api/security/recovery-email` | Elimina correo; requiere step-up. |
-| `POST /api/security/recovery-codes/generate` | Genera codigos y los devuelve una vez; requiere step-up. |
-| `POST /api/security/recovery-codes/regenerate` | Invalida lote anterior y devuelve uno nuevo; requiere step-up. |
-| `POST /api/recovery/email/start` | Solicitud publica OTP o Magic Link con respuesta neutra. |
-| `POST /api/recovery/email/verify-otp` | Prueba email y emite RecoverySession. |
-| `GET /api/recovery/email/verify-link` | Prueba Magic Link y emite RecoverySession. |
-| `POST /api/recovery/code/verify` | Consume codigo y emite RecoverySession. |
-| `POST /api/recovery/passkey/options` | Challenge para restaurar con passkey usando RecoverySession. |
-| `POST /api/recovery/passkey/verify` | Crea passkey y convierte RecoverySession en Session. |
-| `GET /api/recovery/google/start` | Google de restauracion usando RecoverySession. |
-| `GET /api/recovery/google/callback` | Vincula Google y convierte RecoverySession en Session. |
-| `GET /api/sessions` | Lista sesiones activas. |
-| `DELETE /api/sessions/:id` | Revoca una sesion. |
-| `POST /api/sessions/revoke-others` | Revoca todas salvo la actual. |
-| `PATCH /api/profile` | Actualiza `displayName`. |
+| Metodo y ruta                                  | Funcion                                                            |
+| ---------------------------------------------- | ------------------------------------------------------------------ |
+| `GET /api/security/recovery`                   | Estado enmascarado de recovery.                                    |
+| `POST /api/security/recovery-email/start`      | Crea challenge de verificacion OTP o Magic Link; requiere step-up. |
+| `POST /api/security/recovery-email/verify-otp` | Consume OTP y guarda/cambia correo.                                |
+| `GET /api/security/recovery-email/verify-link` | Consume Magic Link y guarda/cambia correo.                         |
+| `DELETE /api/security/recovery-email`          | Elimina correo; requiere step-up.                                  |
+| `POST /api/security/recovery-codes/generate`   | Genera codigos y los devuelve una vez; requiere step-up.           |
+| `POST /api/security/recovery-codes/regenerate` | Invalida lote anterior y devuelve uno nuevo; requiere step-up.     |
+| `POST /api/recovery/email/start`               | Solicitud publica OTP o Magic Link con respuesta neutra.           |
+| `POST /api/recovery/email/verify-otp`          | Prueba email y emite RecoverySession.                              |
+| `GET /api/recovery/email/verify-link`          | Prueba Magic Link y emite RecoverySession.                         |
+| `POST /api/recovery/code/verify`               | Consume codigo y emite RecoverySession.                            |
+| `POST /api/recovery/passkey/options`           | Challenge para restaurar con passkey usando RecoverySession.       |
+| `POST /api/recovery/passkey/verify`            | Crea passkey y convierte RecoverySession en Session.               |
+| `GET /api/recovery/google/start`               | Google de restauracion usando RecoverySession.                     |
+| `GET /api/recovery/google/callback`            | Vincula Google y convierte RecoverySession en Session.             |
+| `GET /api/sessions`                            | Lista sesiones activas.                                            |
+| `DELETE /api/sessions/:id`                     | Revoca una sesion.                                                 |
+| `POST /api/sessions/revoke-others`             | Revoca todas salvo la actual.                                      |
+| `PATCH /api/profile`                           | Actualiza `displayName`.                                           |
 
 Las rutas con retorno por navegador (`Google` y `Magic Link`) terminan redirigiendo a una ruta frontend segura que muestra exito o error generico. Los secretos de Magic Link no se incluyen en la URL final de frontend.
 
