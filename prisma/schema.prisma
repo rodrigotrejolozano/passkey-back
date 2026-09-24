@@ -1,0 +1,211 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum IdentityProvider {
+  GOOGLE
+}
+
+enum SessionAuthMethod {
+  PASSKEY
+  GOOGLE
+  RECOVERY_RESTORED
+}
+
+enum WebAuthnChallengeType {
+  REGISTRATION
+  AUTHENTICATION
+}
+
+enum EmailChallengePurpose {
+  RECOVERY_EMAIL_VERIFICATION
+  ACCOUNT_RECOVERY
+}
+
+enum EmailDeliveryMethod {
+  OTP
+  MAGIC_LINK
+}
+
+enum OAuthTransactionPurpose {
+  LOGIN_OR_SIGNUP
+  LINK
+  STEP_UP
+  RECOVERY_RESTORE
+}
+
+model User {
+  id                 String              @id @default(cuid())
+  displayName        String
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  passkeys           PasskeyCredential[]
+  externalIdentities ExternalIdentity[]
+  recoveryEmail      RecoveryEmail?
+  recoveryCodes      RecoveryCode[]
+  sessions           Session[]
+  recoverySessions   RecoverySession[]
+  emailChallenges    EmailChallenge[]
+  oauthTransactions  OAuthTransaction[]
+}
+
+model PasskeyCredential {
+  id          String   @id @default(cuid())
+  userId      String
+  credentialId String   @unique
+  publicKey   Bytes
+  counter     BigInt
+  transports  String[]
+  deviceType  String?
+  backedUp    Boolean?
+  name        String
+  lastUsedAt  DateTime?
+  createdAt   DateTime @default(now())
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model ExternalIdentity {
+  id                String           @id @default(cuid())
+  userId            String
+  provider          IdentityProvider
+  providerSubjectId String
+  providerEmail     String?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  user              User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerSubjectId])
+  @@unique([userId, provider])
+}
+
+model RecoveryEmail {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  email           String
+  normalizedEmail String   @unique
+  verifiedAt      DateTime
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model RecoveryCode {
+  id            String    @id @default(cuid())
+  userId        String
+  codeHash      String
+  batchId       String
+  usedAt        DateTime?
+  invalidatedAt DateTime?
+  createdAt     DateTime  @default(now())
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, batchId])
+}
+
+model EmailChallenge {
+  id                    String                @id @default(cuid())
+  userId                String?
+  targetEmail           String
+  normalizedTargetEmail String
+  purpose               EmailChallengePurpose
+  deliveryMethod        EmailDeliveryMethod
+  secretHash            String
+  expiresAt             DateTime
+  consumedAt            DateTime?
+  createdAt             DateTime              @default(now())
+  user                  User?                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([normalizedTargetEmail, purpose])
+  @@index([expiresAt])
+}
+
+model Session {
+  id                String            @id @default(cuid())
+  userId            String
+  tokenHash         String            @unique
+  csrfTokenHash     String?
+  authMethod        SessionAuthMethod
+  createdAt         DateTime          @default(now())
+  lastSeenAt        DateTime
+  idleExpiresAt     DateTime
+  absoluteExpiresAt DateTime
+  stepUpExpiresAt   DateTime?
+  revokedAt         DateTime?
+  userAgent         String?
+  ipAddress         String?
+  user              User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  challenges        WebAuthnChallenge[] @relation("SessionChallenges")
+  oauthTransactions OAuthTransaction[]  @relation("SessionOAuthTransactions")
+
+  @@index([userId])
+  @@index([absoluteExpiresAt])
+}
+
+model RecoverySession {
+  id                String              @id @default(cuid())
+  userId            String
+  tokenHash         String              @unique
+  expiresAt         DateTime
+  consumedAt        DateTime?
+  revokedAt         DateTime?
+  createdAt         DateTime            @default(now())
+  user              User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  challenges        WebAuthnChallenge[] @relation("RecoverySessionChallenges")
+  oauthTransactions OAuthTransaction[]  @relation("RecoverySessionOAuthTransactions")
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model WebAuthnChallenge {
+  id                String               @id @default(cuid())
+  challenge         String
+  type              WebAuthnChallengeType
+  userId            String?
+  sessionId         String?
+  recoverySessionId String?
+  pendingUserHandle Bytes?
+  expiresAt         DateTime
+  consumedAt        DateTime?
+  createdAt         DateTime             @default(now())
+  session           Session?             @relation("SessionChallenges", fields: [sessionId], references: [id], onDelete: Cascade)
+  recoverySession   RecoverySession?     @relation("RecoverySessionChallenges", fields: [recoverySessionId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
+  @@index([userId])
+}
+
+model OAuthTransaction {
+  id                String                  @id @default(cuid())
+  state             String                  @unique
+  nonce             String                  @unique
+  purpose           OAuthTransactionPurpose
+  userId            String?
+  sessionId         String?
+  recoverySessionId String?
+  expiresAt         DateTime
+  consumedAt        DateTime?
+  createdAt         DateTime                @default(now())
+  user              User?                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  session           Session?                @relation("SessionOAuthTransactions", fields: [sessionId], references: [id], onDelete: Cascade)
+  recoverySession   RecoverySession?        @relation("RecoverySessionOAuthTransactions", fields: [recoverySessionId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
+}
+
+model RateLimitAttempt {
+  id        String   @id @default(cuid())
+  scope     String
+  key       String
+  createdAt DateTime @default(now())
+
+  @@index([scope, key, createdAt])
+  @@index([createdAt])
+}
