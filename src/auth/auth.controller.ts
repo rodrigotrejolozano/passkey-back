@@ -2,6 +2,8 @@ import { Body, Controller, Get, Post, Req, Res } from "@nestjs/common";
 import { IsNotEmpty, IsObject, IsString, MaxLength } from "class-validator";
 import type { Request, Response } from "express";
 
+import { OAuthTransactionPurpose } from "../generated/prisma/client";
+import { GoogleService } from "../google/google.service";
 import { PasskeyService } from "../passkeys/passkey.service";
 import { SessionService } from "../sessions/session.service";
 
@@ -26,7 +28,28 @@ export class AuthController {
   constructor(
     private readonly passkeys: PasskeyService,
     private readonly sessions: SessionService,
+    private readonly google: GoogleService,
   ) {}
+
+  @Get("google/start")
+  async startGoogle(@Res() response: Response) {
+    response.redirect(
+      await this.google.start(OAuthTransactionPurpose.LOGIN_OR_SIGNUP),
+    );
+  }
+
+  @Get("google/callback")
+  async completeGoogle(@Req() request: Request, @Res() response: Response) {
+    const state =
+      typeof request.query.state === "string" ? request.query.state : "";
+    const code =
+      typeof request.query.code === "string" ? request.query.code : "";
+    const result = await this.google.complete(state, code);
+    this.setSessionCookie(response, result.token);
+    response.redirect(
+      `${process.env.FRONTEND_ORIGIN ?? "http://localhost:3000"}/auth/result?status=success`,
+    );
+  }
 
   @Post("passkey/registration/options")
   async registrationOptions(@Body() body: RegistrationOptionsDto) {
