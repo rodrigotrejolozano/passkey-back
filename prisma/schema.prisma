@@ -172,6 +172,7 @@ model WebAuthnChallenge {
   sessionId         String?
   recoverySessionId String?
   pendingUserHandle Bytes?
+  pendingDisplayName String?
   expiresAt         DateTime
   consumedAt        DateTime?
   createdAt         DateTime             @default(now())
