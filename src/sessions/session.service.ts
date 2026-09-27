@@ -90,6 +90,27 @@ export class SessionService {
     });
   }
 
+  async list(userId: string) {
+    return this.prisma.session.findMany({
+      where: { userId, revokedAt: null },
+      orderBy: { lastSeenAt: "desc" },
+      select: {
+        id: true,
+        createdAt: true,
+        lastSeenAt: true,
+        userAgent: true,
+        ipAddress: true,
+      },
+    });
+  }
+
+  async revokeOthers(userId: string, currentSessionId: string): Promise<void> {
+    await this.prisma.session.updateMany({
+      where: { userId, id: { not: currentSessionId }, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+  }
+
   private hash(value: string): string {
     const secret = this.config.getOrThrow<string>("SESSION_SECRET");
     return createHmac("sha256", secret).update(value).digest("base64url");
