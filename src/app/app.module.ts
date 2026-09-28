@@ -7,6 +7,7 @@ import { ChallengesModule } from "../challenges/challenges.module";
 import { DatabaseModule } from "../database/database.module";
 import { EmailModule } from "../email/email.module";
 import { RateLimitModule } from "../rate-limit/rate-limit.module";
+import { RecoveryModule } from "../recovery/recovery.module";
 import { SecurityModule } from "../security/security.module";
 import { StepUpModule } from "../step-up/step-up.module";
 
@@ -17,6 +18,7 @@ import { StepUpModule } from "../step-up/step-up.module";
     ChallengesModule,
     EmailModule,
     RateLimitModule,
+    RecoveryModule,
     AuthModule,
     SecurityModule,
     StepUpModule,
