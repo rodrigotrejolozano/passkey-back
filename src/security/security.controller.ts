@@ -33,6 +33,12 @@ class UpdateProfileDto {
   displayName!: string;
 }
 
+class RenamePasskeyDto {
+  @IsString()
+  @IsNotEmpty()
+  name!: string;
+}
+
 @Controller("security")
 export class SecurityController {
   constructor(
@@ -83,6 +89,17 @@ export class SecurityController {
       body.response,
     );
     return { data: { added: true } };
+  }
+
+  @Patch("passkeys/:id")
+  async renamePasskey(@Req() request: Request, @Body() body: RenamePasskeyDto) {
+    const session = await this.currentSession(request);
+    await this.sessions.requireStepUp(session.id);
+    await this.prisma.passkeyCredential.updateMany({
+      where: { id: String(request.params.id), userId: session.userId },
+      data: { name: body.name.trim() },
+    });
+    return { data: { renamed: true } };
   }
 
   @Delete("passkeys/:id")
