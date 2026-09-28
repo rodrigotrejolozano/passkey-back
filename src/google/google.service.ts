@@ -28,6 +28,7 @@ export class GoogleService {
     purpose: OAuthTransactionPurpose,
     userId?: string,
     sessionId?: string,
+    recoverySessionId?: string,
   ): Promise<string> {
     const state = this.random.token();
     const nonce = this.random.token();
@@ -38,6 +39,7 @@ export class GoogleService {
         purpose,
         userId,
         sessionId,
+        recoverySessionId,
         expiresAt: new Date(Date.now() + 300_000),
       },
     });
@@ -55,7 +57,11 @@ export class GoogleService {
   async complete(
     state: string,
     code: string,
-  ): Promise<{ token: string; isNewAccount: boolean }> {
+  ): Promise<{
+    token: string;
+    isNewAccount: boolean;
+    purpose: OAuthTransactionPurpose;
+  }> {
     const transaction = await this.prisma.oAuthTransaction.findUnique({
       where: { state },
     });
@@ -66,7 +72,11 @@ export class GoogleService {
     )
       throw this.invalidTransaction();
     const consumed = await this.prisma.oAuthTransaction.updateMany({
-      where: { id: transaction.id, consumedAt: null },
+      where: {
+        id: transaction.id,
+        consumedAt: null,
+        expiresAt: { gt: new Date() },
+      },
       data: { consumedAt: new Date() },
     });
     if (consumed.count !== 1) throw this.invalidTransaction();
@@ -116,8 +126,60 @@ export class GoogleService {
           SessionAuthMethod.GOOGLE,
         ),
         isNewAccount: false,
+        purpose: transaction.purpose,
       };
     }
+    if (transaction.purpose === OAuthTransactionPurpose.RECOVERY_RESTORE) {
+      if (!transaction.userId || !transaction.recoverySessionId)
+        throw this.invalidTransaction();
+      const token = await this.prisma.$transaction(async (database) => {
+        const recoverySession = await database.recoverySession.updateMany({
+          where: {
+            id: transaction.recoverySessionId!,
+            userId: transaction.userId!,
+            consumedAt: null,
+            revokedAt: null,
+            expiresAt: { gt: new Date() },
+          },
+          data: { consumedAt: new Date() },
+        });
+        if (recoverySession.count !== 1) throw this.invalidTransaction();
+
+        const recoveredUserIdentity =
+          await database.externalIdentity.findUnique({
+            where: {
+              userId_provider: {
+                userId: transaction.userId!,
+                provider: IdentityProvider.GOOGLE,
+              },
+            },
+          });
+        if (
+          (existing && existing.userId !== transaction.userId) ||
+          (recoveredUserIdentity &&
+            recoveredUserIdentity.providerSubjectId !== claims.sub)
+        )
+          throw this.invalidTransaction();
+        if (!existing) {
+          await database.externalIdentity.create({
+            data: {
+              userId: transaction.userId!,
+              provider: IdentityProvider.GOOGLE,
+              providerSubjectId: claims.sub,
+              providerEmail: claims.email,
+            },
+          });
+        }
+        return this.sessions.create(
+          transaction.userId!,
+          SessionAuthMethod.RECOVERY_RESTORED,
+          database,
+        );
+      });
+      return { token, isNewAccount: false, purpose: transaction.purpose };
+    }
+    if (transaction.purpose !== OAuthTransactionPurpose.LOGIN_OR_SIGNUP)
+      throw this.invalidTransaction();
     if (existing)
       return {
         token: await this.sessions.create(
@@ -125,6 +187,7 @@ export class GoogleService {
           SessionAuthMethod.GOOGLE,
         ),
         isNewAccount: false,
+        purpose: transaction.purpose,
       };
     const user = await this.prisma.user.create({
       data: {
@@ -141,6 +204,7 @@ export class GoogleService {
     return {
       token: await this.sessions.create(user.id, SessionAuthMethod.GOOGLE),
       isNewAccount: true,
+      purpose: transaction.purpose,
     };
   }
 

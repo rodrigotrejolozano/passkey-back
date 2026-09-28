@@ -24,7 +24,11 @@ export class SessionService {
     return sessionCookieName;
   }
 
-  async create(userId: string, authMethod: SessionAuthMethod): Promise<string> {
+  async create(
+    userId: string,
+    authMethod: SessionAuthMethod,
+    database: Pick<PrismaService, "session"> = this.prisma,
+  ): Promise<string> {
     const token = this.random.token();
     const now = new Date();
     const idleHours = Number(
@@ -34,7 +38,7 @@ export class SessionService {
       this.config.get("SESSION_ABSOLUTE_TIMEOUT_DAYS") ?? 30,
     );
 
-    await this.prisma.session.create({
+    await database.session.create({
       data: {
         userId,
         tokenHash: this.hash(token),

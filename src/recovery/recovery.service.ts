@@ -282,7 +282,7 @@ export class RecoveryService {
       throw this.invalidCode();
     const { credential, credentialDeviceType, credentialBackedUp } =
       verification.registrationInfo;
-    await this.prisma.$transaction(async (transaction) => {
+    return this.prisma.$transaction(async (transaction) => {
       const consumed = await transaction.recoverySession.updateMany({
         where: { id: recoverySession.id, consumedAt: null },
         data: { consumedAt: new Date() },
@@ -300,11 +300,12 @@ export class RecoveryService {
           name: "Recovered passkey",
         },
       });
+      return this.sessions.create(
+        recoverySession.userId,
+        SessionAuthMethod.RECOVERY_RESTORED,
+        transaction,
+      );
     });
-    return this.sessions.create(
-      recoverySession.userId,
-      SessionAuthMethod.RECOVERY_RESTORED,
-    );
   }
 
   private hash(value: string) {

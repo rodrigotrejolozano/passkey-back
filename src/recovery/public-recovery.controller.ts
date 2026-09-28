@@ -1,7 +1,9 @@
-import { Body, Controller, Post, Req, Res } from "@nestjs/common";
+import { Body, Controller, Get, Post, Req, Res } from "@nestjs/common";
 import { IsEmail, IsNotEmpty, IsObject, IsString } from "class-validator";
 import type { Request, Response } from "express";
 
+import { OAuthTransactionPurpose } from "../generated/prisma/client";
+import { GoogleService } from "../google/google.service";
 import { RecoveryService } from "./recovery.service";
 
 class PublicRecoveryDto {
@@ -22,7 +24,10 @@ class RestorePasskeyDto {
 
 @Controller("recovery")
 export class PublicRecoveryController {
-  constructor(private readonly recovery: RecoveryService) {}
+  constructor(
+    private readonly recovery: RecoveryService,
+    private readonly google: GoogleService,
+  ) {}
 
   @Post("request")
   async request(@Body() body: PublicRecoveryDto) {
@@ -96,6 +101,21 @@ export class PublicRecoveryController {
       path: "/",
     });
     return { data: { restored: true } };
+  }
+
+  @Get("google/start")
+  async restoreGoogle(@Req() request: Request, @Res() response: Response) {
+    const recoverySession = await this.recovery.getActiveRecoverySession(
+      this.recoveryToken(request),
+    );
+    response.redirect(
+      await this.google.start(
+        OAuthTransactionPurpose.RECOVERY_RESTORE,
+        recoverySession.userId,
+        undefined,
+        recoverySession.id,
+      ),
+    );
   }
 
   private recoveryToken(request: Request) {

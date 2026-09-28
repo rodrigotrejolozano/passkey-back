@@ -46,8 +46,21 @@ export class AuthController {
       typeof request.query.code === "string" ? request.query.code : "";
     const result = await this.google.complete(state, code);
     this.setSessionCookie(response, result.token);
+    if (result.purpose === OAuthTransactionPurpose.RECOVERY_RESTORE) {
+      response.clearCookie("passkey_recovery", {
+        httpOnly: true,
+        sameSite: "lax",
+        secure: process.env.NODE_ENV === "production",
+        path: "/",
+      });
+    }
+    const flow =
+      result.purpose === OAuthTransactionPurpose.RECOVERY_RESTORE
+        ? "recovery"
+        : "auth";
+    const isNewAccount = result.isNewAccount ? "&new=1" : "";
     response.redirect(
-      `${process.env.FRONTEND_ORIGIN ?? "http://localhost:3000"}/auth/result?status=success`,
+      `${process.env.FRONTEND_ORIGIN ?? "http://localhost:3000"}/auth/result?status=success&flow=${flow}${isNewAccount}`,
     );
   }
 
