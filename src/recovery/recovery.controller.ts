@@ -21,7 +21,9 @@ import type { Request, Response } from "express";
 
 import { EmailDeliveryMethod } from "../generated/prisma/client";
 import { SessionService } from "../sessions/session.service";
+import { SessionGuard } from "../sessions/session.guard";
 import { SessionCsrfGuard } from "../security/csrf.guard";
+import { StepUpGuard } from "../step-up/step-up.guard";
 import { RecoveryService } from "./recovery.service";
 
 class RequestRecoveryEmailDto {
@@ -36,7 +38,6 @@ class VerifyRecoveryEmailDto {
 }
 
 @Controller("security/recovery-email")
-@UseGuards(SessionCsrfGuard)
 export class RecoveryController {
   constructor(
     private readonly recovery: RecoveryService,
@@ -45,6 +46,7 @@ export class RecoveryController {
   ) {}
 
   @Get()
+  @UseGuards(SessionGuard)
   async get(@Req() request: Request) {
     const session = await this.current(request);
     const recoveryEmail = await this.recovery.getRecoveryEmail(session.userId);
@@ -52,6 +54,7 @@ export class RecoveryController {
   }
 
   @Post("verification")
+  @UseGuards(SessionGuard, SessionCsrfGuard, StepUpGuard)
   async requestVerification(
     @Req() request: Request,
     @Body() body: RequestRecoveryEmailDto,
@@ -89,6 +92,7 @@ export class RecoveryController {
   }
 
   @Post("verification/confirm")
+  @UseGuards(SessionGuard, SessionCsrfGuard, StepUpGuard)
   async confirmVerification(
     @Req() request: Request,
     @Body() body: VerifyRecoveryEmailDto,
@@ -104,6 +108,7 @@ export class RecoveryController {
   }
 
   @Delete()
+  @UseGuards(SessionGuard, SessionCsrfGuard, StepUpGuard)
   async remove(@Req() request: Request) {
     const session = await this.current(request);
     await this.sessions.requireStepUp(session.id);
@@ -112,6 +117,7 @@ export class RecoveryController {
   }
 
   @Post("codes")
+  @UseGuards(SessionGuard, SessionCsrfGuard, StepUpGuard)
   async generateCodes(@Req() request: Request) {
     const session = await this.current(request);
     await this.sessions.requireStepUp(session.id);

@@ -15,6 +15,7 @@ import { GoogleService } from "../google/google.service";
 import { PasskeyService } from "../passkeys/passkey.service";
 import { SessionCsrfGuard } from "../security/csrf.guard";
 import { CsrfService } from "../security/csrf.service";
+import { SessionGuard } from "../sessions/session.guard";
 import { SessionService } from "../sessions/session.service";
 
 class RegistrationOptionsDto {
@@ -57,13 +58,28 @@ export class AuthController {
       typeof request.query.code === "string" ? request.query.code : "";
     const recoveryToken = request.cookies?.passkey_recovery as
       string | undefined;
+    const sessionToken = request.cookies?.[this.sessions.cookieName] as
+      string | undefined;
+    const purpose = await this.google.getPurpose(state);
     let result;
     try {
-      result = await this.google.complete(state, code, recoveryToken);
+      result = await this.google.complete(
+        state,
+        code,
+        recoveryToken,
+        sessionToken,
+      );
     } catch (cause) {
-      if (recoveryToken) {
+      if (
+        purpose === OAuthTransactionPurpose.RECOVERY_RESTORE ||
+        purpose === OAuthTransactionPurpose.STEP_UP
+      ) {
+        const flow =
+          purpose === OAuthTransactionPurpose.RECOVERY_RESTORE
+            ? "recovery"
+            : "step-up";
         response.redirect(
-          `${process.env.FRONTEND_ORIGIN ?? "http://localhost:3000"}/auth/result?status=error&flow=recovery`,
+          `${process.env.FRONTEND_ORIGIN ?? "http://localhost:3000"}/auth/result?status=error&flow=${flow}`,
         );
         return;
       }
@@ -81,7 +97,9 @@ export class AuthController {
     const flow =
       result.purpose === OAuthTransactionPurpose.RECOVERY_RESTORE
         ? "recovery"
-        : "auth";
+        : result.purpose === OAuthTransactionPurpose.STEP_UP
+          ? "step-up"
+          : "auth";
     const isNewAccount = result.isNewAccount ? "&new=1" : "";
     response.redirect(
       `${process.env.FRONTEND_ORIGIN ?? "http://localhost:3000"}/auth/result?status=success&flow=${flow}${isNewAccount}`,
@@ -127,6 +145,7 @@ export class AuthController {
   }
 
   @Get("me")
+  @UseGuards(SessionGuard)
   async me(@Req() request: Request) {
     const token = request.cookies?.[this.sessions.cookieName] as
       string | undefined;
@@ -153,7 +172,7 @@ export class AuthController {
   }
 
   @Post("logout")
-  @UseGuards(SessionCsrfGuard)
+  @UseGuards(SessionGuard, SessionCsrfGuard)
   async logout(
     @Req() request: Request,
     @Res({ passthrough: true }) response: Response,

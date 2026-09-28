@@ -18,6 +18,8 @@ import { GoogleService } from "../google/google.service";
 import { OAuthTransactionPurpose } from "../generated/prisma/client";
 import { PasskeyService } from "../passkeys/passkey.service";
 import { SessionService } from "../sessions/session.service";
+import { SessionGuard } from "../sessions/session.guard";
+import { StepUpGuard } from "../step-up/step-up.guard";
 import { SessionCsrfGuard } from "./csrf.guard";
 
 class VerifyPasskeyDto {
@@ -42,7 +44,7 @@ class RenamePasskeyDto {
 }
 
 @Controller("security")
-@UseGuards(SessionCsrfGuard)
+@UseGuards(SessionGuard, SessionCsrfGuard)
 export class SecurityController {
   constructor(
     private readonly prisma: PrismaService,
@@ -70,6 +72,7 @@ export class SecurityController {
   }
 
   @Post("passkeys/options")
+  @UseGuards(StepUpGuard)
   async addPasskeyOptions(@Req() request: Request) {
     const session = await this.currentSession(request);
     await this.sessions.requireStepUp(session.id);
@@ -79,6 +82,7 @@ export class SecurityController {
   }
 
   @Post("passkeys/verify")
+  @UseGuards(StepUpGuard)
   async addPasskeyVerify(
     @Req() request: Request,
     @Body() body: VerifyPasskeyDto,
@@ -95,6 +99,7 @@ export class SecurityController {
   }
 
   @Patch("passkeys/:id")
+  @UseGuards(StepUpGuard)
   async renamePasskey(@Req() request: Request, @Body() body: RenamePasskeyDto) {
     const session = await this.currentSession(request);
     await this.sessions.requireStepUp(session.id);
@@ -106,6 +111,7 @@ export class SecurityController {
   }
 
   @Delete("passkeys/:id")
+  @UseGuards(StepUpGuard)
   async removePasskey(@Req() request: Request) {
     const session = await this.currentSession(request);
     await this.sessions.requireStepUp(session.id);
@@ -150,6 +156,7 @@ export class SecurityController {
   }
 
   @Get("google/connect")
+  @UseGuards(StepUpGuard)
   async connectGoogle(@Req() request: Request, @Res() response: Response) {
     const session = await this.currentSession(request);
     await this.sessions.requireStepUp(session.id);
@@ -163,6 +170,7 @@ export class SecurityController {
   }
 
   @Delete("google")
+  @UseGuards(StepUpGuard)
   async disconnectGoogle(@Req() request: Request) {
     const session = await this.currentSession(request);
     await this.sessions.requireStepUp(session.id);

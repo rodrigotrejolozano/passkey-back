@@ -55,10 +55,25 @@ export class GoogleService {
     return url.toString();
   }
 
+  async getPurpose(state: string): Promise<OAuthTransactionPurpose> {
+    const transaction = await this.prisma.oAuthTransaction.findUnique({
+      where: { state },
+      select: { purpose: true, consumedAt: true, expiresAt: true },
+    });
+    if (
+      !transaction ||
+      transaction.consumedAt ||
+      transaction.expiresAt <= new Date()
+    )
+      throw this.invalidTransaction();
+    return transaction.purpose;
+  }
+
   async complete(
     state: string,
     code: string,
     recoveryToken?: string,
+    sessionToken?: string,
   ): Promise<{
     token: string;
     isNewAccount: boolean;
@@ -105,7 +120,15 @@ export class GoogleService {
       },
     });
     if (transaction.purpose === OAuthTransactionPurpose.LINK) {
-      if (!transaction.userId) throw this.invalidTransaction();
+      if (!transaction.userId || !transaction.sessionId || !sessionToken)
+        throw this.invalidTransaction();
+      const session = await this.sessions.getActive(sessionToken);
+      if (
+        session.id !== transaction.sessionId ||
+        session.userId !== transaction.userId
+      )
+        throw this.invalidTransaction();
+      await this.sessions.requireStepUp(session.id);
       if (existing && existing.userId !== transaction.userId)
         throw new ConflictException({
           error: {
@@ -123,10 +146,25 @@ export class GoogleService {
           },
         });
       return {
-        token: await this.sessions.create(
-          transaction.userId,
-          SessionAuthMethod.GOOGLE,
-        ),
+        token: sessionToken,
+        isNewAccount: false,
+        purpose: transaction.purpose,
+      };
+    }
+    if (transaction.purpose === OAuthTransactionPurpose.STEP_UP) {
+      if (!transaction.userId || !transaction.sessionId || !sessionToken)
+        throw this.invalidTransaction();
+      const session = await this.sessions.getActive(sessionToken);
+      if (
+        session.id !== transaction.sessionId ||
+        session.userId !== transaction.userId ||
+        !existing ||
+        existing.userId !== transaction.userId
+      )
+        throw this.invalidTransaction();
+      await this.sessions.markStepUp(session.id);
+      return {
+        token: sessionToken,
         isNewAccount: false,
         purpose: transaction.purpose,
       };

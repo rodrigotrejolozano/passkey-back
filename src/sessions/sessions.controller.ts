@@ -10,10 +10,11 @@ import {
 import type { Request } from "express";
 
 import { SessionCsrfGuard } from "../security/csrf.guard";
+import { SessionGuard } from "./session.guard";
 import { SessionService } from "./session.service";
 
 @Controller("sessions")
-@UseGuards(SessionCsrfGuard)
+@UseGuards(SessionGuard, SessionCsrfGuard)
 export class SessionsController {
   constructor(private readonly sessions: SessionService) {}
 

@@ -7,6 +7,7 @@ import { EmailModule } from "../email/email.module";
 import { GoogleModule } from "../google/google.module";
 import { RateLimitModule } from "../rate-limit/rate-limit.module";
 import { SessionsModule } from "../sessions/sessions.module";
+import { StepUpModule } from "../step-up/step-up.module";
 import { RecoveryController } from "./recovery.controller";
 import { PublicRecoveryController } from "./public-recovery.controller";
 import { RecoverySessionGuard } from "./recovery-session.guard";
@@ -20,6 +21,7 @@ import { RecoveryService } from "./recovery.service";
     GoogleModule,
     RateLimitModule,
     SessionsModule,
+    StepUpModule,
   ],
   controllers: [RecoveryController, PublicRecoveryController],
   providers: [RandomSource, RecoveryService, RecoverySessionGuard],

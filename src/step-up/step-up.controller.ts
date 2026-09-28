@@ -5,6 +5,7 @@ import type { Request } from "express";
 import { PasskeyService } from "../passkeys/passkey.service";
 import { SessionCsrfGuard } from "../security/csrf.guard";
 import { SessionService } from "../sessions/session.service";
+import { SessionGuard } from "../sessions/session.guard";
 
 class VerifyStepUpDto {
   @IsString() @IsNotEmpty() challengeId!: string;
@@ -12,7 +13,7 @@ class VerifyStepUpDto {
 }
 
 @Controller("step-up/passkey")
-@UseGuards(SessionCsrfGuard)
+@UseGuards(SessionGuard, SessionCsrfGuard)
 export class StepUpController {
   constructor(
     private readonly passkeys: PasskeyService,
