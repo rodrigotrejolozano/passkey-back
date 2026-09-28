@@ -4,22 +4,32 @@ import {
   Injectable,
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
+import {
+  generateRegistrationOptions,
+  verifyRegistrationResponse,
+} from "@simplewebauthn/server";
 import { createHmac, randomBytes, randomInt } from "node:crypto";
 
+import { ChallengeStore } from "../challenges/challenge.store";
 import { RandomSource } from "../common/random-source";
 import { PrismaService } from "../database/prisma.service";
 import { EmailProvider } from "../email/email.provider";
 import {
   EmailChallengePurpose,
   EmailDeliveryMethod,
+  SessionAuthMethod,
+  WebAuthnChallengeType,
 } from "../generated/prisma/client";
+import { SessionService } from "../sessions/session.service";
 
 @Injectable()
 export class RecoveryService {
   constructor(
     private readonly prisma: PrismaService,
+    private readonly challenges: ChallengeStore,
     private readonly email: EmailProvider,
     private readonly random: RandomSource,
+    private readonly sessions: SessionService,
     private readonly config: ConfigService,
   ) {}
 
@@ -224,6 +234,85 @@ export class RecoveryService {
     return token;
   }
 
+  async restorePasskeyOptions(recoveryToken: string) {
+    const recoverySession = await this.getActiveRecoverySession(recoveryToken);
+    const existing = await this.prisma.passkeyCredential.findMany({
+      where: { userId: recoverySession.userId },
+      select: { credentialId: true, transports: true },
+    });
+    const options = await generateRegistrationOptions({
+      rpID: this.rpId,
+      rpName: this.rpName,
+      userID: randomBytes(32),
+      userName: recoverySession.userId,
+      userDisplayName: "Recovered user",
+      excludeCredentials: existing.map((credential) => ({
+        id: credential.credentialId,
+        transports: credential.transports as never,
+      })),
+      authenticatorSelection: {
+        residentKey: "required",
+        userVerification: "required",
+      },
+    });
+    const challenge = await this.challenges.create({
+      challenge: options.challenge,
+      type: WebAuthnChallengeType.REGISTRATION,
+      userId: recoverySession.userId,
+      recoverySessionId: recoverySession.id,
+      expiresAt: new Date(Date.now() + 300_000),
+    });
+    return { challengeId: challenge.id, options };
+  }
+
+  async verifyRestoredPasskey(
+    recoveryToken: string,
+    challengeId: string,
+    response: unknown,
+  ): Promise<string> {
+    const recoverySession = await this.getActiveRecoverySession(recoveryToken);
+    const challenge = await this.challenges.consume(challengeId, new Date());
+    if (
+      !challenge ||
+      challenge.type !== WebAuthnChallengeType.REGISTRATION ||
+      challenge.userId !== recoverySession.userId ||
+      challenge.recoverySessionId !== recoverySession.id
+    )
+      throw this.invalidCode();
+    const verification = await verifyRegistrationResponse({
+      response: response as never,
+      expectedChallenge: challenge.challenge,
+      expectedOrigin: this.origin,
+      expectedRPID: this.rpId,
+      requireUserVerification: true,
+    });
+    if (!verification.verified || !verification.registrationInfo)
+      throw this.invalidCode();
+    const { credential, credentialDeviceType, credentialBackedUp } =
+      verification.registrationInfo;
+    const consumed = await this.prisma.recoverySession.updateMany({
+      where: { id: recoverySession.id, consumedAt: null },
+      data: { consumedAt: new Date() },
+    });
+    if (consumed.count !== 1) throw this.invalidCode();
+    await this.prisma.passkeyCredential.create({
+      data: {
+        userId: recoverySession.userId,
+        credentialId: credential.id,
+        publicKey: credential.publicKey,
+        counter: BigInt(credential.counter),
+        transports: credential.transports ?? [],
+        deviceType: credentialDeviceType,
+        backedUp: credentialBackedUp,
+        name: "Recovered passkey",
+      },
+    });
+    return this.sessions.create(
+      recoverySession.userId,
+      SessionAuthMethod.RECOVERY_RESTORED,
+    );
+  }
+
   private hash(value: string) {
     return createHmac(
       "sha256",
@@ -244,5 +333,15 @@ export class RecoveryService {
 
   private recoveryCode() {
     return randomBytes(8).toString("hex").toUpperCase();
+  }
+
+  private get rpId() {
+    return this.config.getOrThrow<string>("WEBAUTHN_RP_ID");
+  }
+  private get rpName() {
+    return this.config.getOrThrow<string>("WEBAUTHN_RP_NAME");
+  }
+  private get origin() {
+    return this.config.getOrThrow<string>("WEBAUTHN_ORIGIN");
   }
 }

@@ -1,6 +1,6 @@
-import { Body, Controller, Post, Res } from "@nestjs/common";
+import { Body, Controller, Post, Req, Res } from "@nestjs/common";
 import { IsEmail, IsNotEmpty, IsString } from "class-validator";
-import type { Response } from "express";
+import type { Request, Response } from "express";
 
 import { RecoveryService } from "./recovery.service";
 
@@ -13,6 +13,10 @@ class PublicRecoveryVerifyDto {
 }
 class RecoveryCodeDto {
   @IsString() @IsNotEmpty() code!: string;
+}
+class RestorePasskeyDto {
+  @IsString() @IsNotEmpty() challengeId!: string;
+  response!: Record<string, unknown>;
 }
 
 @Controller("recovery")
@@ -56,5 +60,44 @@ export class PublicRecoveryController {
       path: "/",
     });
     return { data: { verified: true } };
+  }
+
+  @Post("restore/passkey/options")
+  async restorePasskeyOptions(@Req() request: Request) {
+    return {
+      data: await this.recovery.restorePasskeyOptions(
+        this.recoveryToken(request),
+      ),
+    };
+  }
+
+  @Post("restore/passkey/verify")
+  async restorePasskeyVerify(
+    @Req() request: Request,
+    @Body() body: RestorePasskeyDto,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const token = await this.recovery.verifyRestoredPasskey(
+      this.recoveryToken(request),
+      body.challengeId,
+      body.response,
+    );
+    response.clearCookie("passkey_recovery", {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      path: "/",
+    });
+    response.cookie("passkey_session", token, {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      path: "/",
+    });
+    return { data: { restored: true } };
+  }
+
+  private recoveryToken(request: Request) {
+    return (request.cookies?.passkey_recovery as string | undefined) ?? "";
   }
 }
