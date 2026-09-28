@@ -99,8 +99,14 @@ export class SessionService {
   }
 
   async list(userId: string) {
+    const now = new Date();
     return this.prisma.session.findMany({
-      where: { userId, revokedAt: null },
+      where: {
+        userId,
+        revokedAt: null,
+        idleExpiresAt: { gt: now },
+        absoluteExpiresAt: { gt: now },
+      },
       orderBy: { lastSeenAt: "desc" },
       select: {
         id: true,
