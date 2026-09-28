@@ -7,6 +7,7 @@ import { ChallengesModule } from "../challenges/challenges.module";
 import { DatabaseModule } from "../database/database.module";
 import { EmailModule } from "../email/email.module";
 import { RateLimitModule } from "../rate-limit/rate-limit.module";
+import { SecurityModule } from "../security/security.module";
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { RateLimitModule } from "../rate-limit/rate-limit.module";
     EmailModule,
     RateLimitModule,
     AuthModule,
+    SecurityModule,
   ],
   controllers: [AppController],
 })
