@@ -11,6 +11,9 @@ class PublicRecoveryVerifyDto {
   @IsEmail() email!: string;
   @IsString() @IsNotEmpty() code!: string;
 }
+class RecoveryCodeDto {
+  @IsString() @IsNotEmpty() code!: string;
+}
 
 @Controller("recovery")
 export class PublicRecoveryController {
@@ -31,6 +34,21 @@ export class PublicRecoveryController {
       body.email,
       body.code,
     );
+    response.cookie("passkey_recovery", token, {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      path: "/",
+    });
+    return { data: { verified: true } };
+  }
+
+  @Post("code")
+  async code(
+    @Body() body: RecoveryCodeDto,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const token = await this.recovery.verifyRecoveryCode(body.code);
     response.cookie("passkey_recovery", token, {
       httpOnly: true,
       sameSite: "lax",

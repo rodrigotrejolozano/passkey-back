@@ -65,6 +65,17 @@ export class RecoveryController {
     return { data: { removed: true } };
   }
 
+  @Post("codes")
+  async generateCodes(@Req() request: Request) {
+    const session = await this.current(request);
+    await this.sessions.requireStepUp(session.id);
+    return {
+      data: {
+        codes: await this.recovery.generateRecoveryCodes(session.userId),
+      },
+    };
+  }
+
   private async current(request: Request) {
     const token = request.cookies?.[this.sessions.cookieName] as
       string | undefined;

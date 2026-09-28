@@ -1,6 +1,10 @@
-import { BadRequestException, Injectable } from "@nestjs/common";
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+} from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import { createHmac, randomInt } from "node:crypto";
+import { createHmac, randomBytes, randomInt } from "node:crypto";
 
 import { RandomSource } from "../common/random-source";
 import { PrismaService } from "../database/prisma.service";
@@ -54,6 +58,18 @@ export class RecoveryService {
     });
     if (!challenge || this.hash(code) !== challenge.secretHash)
       throw this.invalidCode();
+    const existing = await this.prisma.recoveryEmail.findUnique({
+      where: { normalizedEmail: challenge.normalizedTargetEmail },
+      select: { userId: true },
+    });
+    if (existing && existing.userId !== userId) {
+      throw new ConflictException({
+        error: {
+          code: "RECOVERY_EMAIL_TAKEN",
+          message: "This recovery email is already used by another account.",
+        },
+      });
+    }
     const consumed = await this.prisma.emailChallenge.updateMany({
       where: { id: challenge.id, consumedAt: null },
       data: { consumedAt: new Date() },
@@ -161,6 +177,53 @@ export class RecoveryService {
     return session;
   }
 
+  async generateRecoveryCodes(userId: string): Promise<string[]> {
+    const batchId = this.random.token();
+    const codes = Array.from({ length: 10 }, () => this.recoveryCode());
+    await this.prisma.$transaction(async (transaction) => {
+      await transaction.recoveryCode.updateMany({
+        where: { userId, usedAt: null, invalidatedAt: null },
+        data: { invalidatedAt: new Date() },
+      });
+      await transaction.recoveryCode.createMany({
+        data: codes.map((code) => ({
+          userId,
+          batchId,
+          codeHash: this.hash(code),
+        })),
+      });
+    });
+    return codes;
+  }
+
+  async verifyRecoveryCode(code: string): Promise<string> {
+    const recoveryCode = await this.prisma.recoveryCode.findFirst({
+      where: {
+        codeHash: this.hash(code.replace(/\s/g, "").toUpperCase()),
+        usedAt: null,
+        invalidatedAt: null,
+      },
+    });
+    if (!recoveryCode) throw this.invalidCode();
+    const used = await this.prisma.recoveryCode.updateMany({
+      where: { id: recoveryCode.id, usedAt: null, invalidatedAt: null },
+      data: { usedAt: new Date() },
+    });
+    if (used.count !== 1) throw this.invalidCode();
+    const token = this.random.token();
+    const timeoutMinutes = Number(
+      this.config.get("RECOVERY_SESSION_TIMEOUT_MINUTES") ?? 15,
+    );
+    await this.prisma.recoverySession.create({
+      data: {
+        userId: recoveryCode.userId,
+        tokenHash: this.hash(token),
+        expiresAt: new Date(Date.now() + timeoutMinutes * 60_000),
+      },
+    });
+    return token;
+  }
+
   private hash(value: string) {
     return createHmac(
       "sha256",
@@ -177,5 +240,9 @@ export class RecoveryService {
         message: "This verification code is invalid or expired.",
       },
     });
+  }
+
+  private recoveryCode() {
+    return randomBytes(8).toString("hex").toUpperCase();
   }
 }
