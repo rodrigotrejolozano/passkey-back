@@ -1,4 +1,13 @@
-import { Body, Controller, Get, Post, Query, Req, Res } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Get,
+  Post,
+  Query,
+  Req,
+  Res,
+  UseGuards,
+} from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import {
   IsEmail,
@@ -15,6 +24,7 @@ import {
   OAuthTransactionPurpose,
 } from "../generated/prisma/client";
 import { GoogleService } from "../google/google.service";
+import { RecoverySessionGuard } from "./recovery-session.guard";
 import { RecoveryService } from "./recovery.service";
 
 class PublicRecoveryDto {
@@ -74,6 +84,7 @@ export class PublicRecoveryController {
   }
 
   @Post("restore/passkey/options")
+  @UseGuards(RecoverySessionGuard)
   async restorePasskeyOptions(@Req() request: Request) {
     return {
       data: await this.recovery.restorePasskeyOptions(
@@ -83,6 +94,7 @@ export class PublicRecoveryController {
   }
 
   @Post("restore/passkey/verify")
+  @UseGuards(RecoverySessionGuard)
   async restorePasskeyVerify(
     @Req() request: Request,
     @Body() body: RestorePasskeyDto,
@@ -109,6 +121,7 @@ export class PublicRecoveryController {
   }
 
   @Get("google/start")
+  @UseGuards(RecoverySessionGuard)
   async restoreGoogle(@Req() request: Request, @Res() response: Response) {
     const recoverySession = await this.recovery.getActiveRecoverySession(
       this.recoveryToken(request),

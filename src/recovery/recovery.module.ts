@@ -8,6 +8,7 @@ import { GoogleModule } from "../google/google.module";
 import { SessionsModule } from "../sessions/sessions.module";
 import { RecoveryController } from "./recovery.controller";
 import { PublicRecoveryController } from "./public-recovery.controller";
+import { RecoverySessionGuard } from "./recovery-session.guard";
 import { RecoveryService } from "./recovery.service";
 
 @Module({
@@ -19,6 +20,6 @@ import { RecoveryService } from "./recovery.service";
     SessionsModule,
   ],
   controllers: [RecoveryController, PublicRecoveryController],
-  providers: [RandomSource, RecoveryService],
+  providers: [RandomSource, RecoveryService, RecoverySessionGuard],
 })
 export class RecoveryModule {}
