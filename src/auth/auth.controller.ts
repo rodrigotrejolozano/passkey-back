@@ -101,6 +101,7 @@ export class AuthController {
           displayName: session.user.displayName,
           createdAt: session.user.createdAt,
         },
+        authMethod: session.authMethod,
       },
     };
   }
