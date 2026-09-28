@@ -236,20 +236,12 @@ export class RecoveryService {
 
   async restorePasskeyOptions(recoveryToken: string) {
     const recoverySession = await this.getActiveRecoverySession(recoveryToken);
-    const existing = await this.prisma.passkeyCredential.findMany({
-      where: { userId: recoverySession.userId },
-      select: { credentialId: true, transports: true },
-    });
     const options = await generateRegistrationOptions({
       rpID: this.rpId,
       rpName: this.rpName,
       userID: randomBytes(32),
       userName: recoverySession.userId,
       userDisplayName: "Recovered user",
-      excludeCredentials: existing.map((credential) => ({
-        id: credential.credentialId,
-        transports: credential.transports as never,
-      })),
       authenticatorSelection: {
         residentKey: "required",
         userVerification: "required",
@@ -290,22 +282,24 @@ export class RecoveryService {
       throw this.invalidCode();
     const { credential, credentialDeviceType, credentialBackedUp } =
       verification.registrationInfo;
-    const consumed = await this.prisma.recoverySession.updateMany({
-      where: { id: recoverySession.id, consumedAt: null },
-      data: { consumedAt: new Date() },
-    });
-    if (consumed.count !== 1) throw this.invalidCode();
-    await this.prisma.passkeyCredential.create({
-      data: {
-        userId: recoverySession.userId,
-        credentialId: credential.id,
-        publicKey: credential.publicKey,
-        counter: BigInt(credential.counter),
-        transports: credential.transports ?? [],
-        deviceType: credentialDeviceType,
-        backedUp: credentialBackedUp,
-        name: "Recovered passkey",
-      },
+    await this.prisma.$transaction(async (transaction) => {
+      const consumed = await transaction.recoverySession.updateMany({
+        where: { id: recoverySession.id, consumedAt: null },
+        data: { consumedAt: new Date() },
+      });
+      if (consumed.count !== 1) throw this.invalidCode();
+      await transaction.passkeyCredential.create({
+        data: {
+          userId: recoverySession.userId,
+          credentialId: credential.id,
+          publicKey: credential.publicKey,
+          counter: BigInt(credential.counter),
+          transports: credential.transports ?? [],
+          deviceType: credentialDeviceType,
+          backedUp: credentialBackedUp,
+          name: "Recovered passkey",
+        },
+      });
     });
     return this.sessions.create(
       recoverySession.userId,

@@ -1,5 +1,5 @@
 import { Body, Controller, Post, Req, Res } from "@nestjs/common";
-import { IsEmail, IsNotEmpty, IsString } from "class-validator";
+import { IsEmail, IsNotEmpty, IsObject, IsString } from "class-validator";
 import type { Request, Response } from "express";
 
 import { RecoveryService } from "./recovery.service";
@@ -16,6 +16,7 @@ class RecoveryCodeDto {
 }
 class RestorePasskeyDto {
   @IsString() @IsNotEmpty() challengeId!: string;
+  @IsObject()
   response!: Record<string, unknown>;
 }
 
