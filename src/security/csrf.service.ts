@@ -6,19 +6,17 @@ import {
 import { ConfigService } from "@nestjs/config";
 import { createHmac, timingSafeEqual } from "node:crypto";
 
-import { RandomSource } from "../common/random-source";
 import { PrismaService } from "../database/prisma.service";
 
 @Injectable()
 export class CsrfService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly random: RandomSource,
     private readonly config: ConfigService,
   ) {}
 
   async issueSessionToken(sessionToken: string): Promise<string> {
-    const token = this.random.token();
+    const token = this.deriveToken(sessionToken);
     const updated = await this.prisma.session.updateMany({
       where: {
         tokenHash: this.sessionHash(sessionToken),
@@ -33,7 +31,7 @@ export class CsrfService {
   }
 
   async issueRecoveryToken(recoveryToken: string): Promise<string> {
-    const token = this.random.token();
+    const token = this.deriveToken(recoveryToken);
     const updated = await this.prisma.recoverySession.updateMany({
       where: {
         tokenHash: this.sessionHash(recoveryToken),
@@ -109,6 +107,12 @@ export class CsrfService {
   private csrfHash(value: string) {
     return createHmac("sha256", this.config.getOrThrow<string>("CSRF_SECRET"))
       .update(value)
+      .digest("base64url");
+  }
+
+  private deriveToken(sessionToken: string) {
+    return createHmac("sha256", this.config.getOrThrow<string>("CSRF_SECRET"))
+      .update(`csrf:${sessionToken}`)
       .digest("base64url");
   }
 

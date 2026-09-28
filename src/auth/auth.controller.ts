@@ -13,6 +13,7 @@ import type { Request, Response } from "express";
 import { OAuthTransactionPurpose } from "../generated/prisma/client";
 import { GoogleService } from "../google/google.service";
 import { PasskeyService } from "../passkeys/passkey.service";
+import { RateLimitService } from "../rate-limit/rate-limit.service";
 import { SessionCsrfGuard } from "../security/csrf.guard";
 import { CsrfService } from "../security/csrf.service";
 import { SessionGuard } from "../sessions/session.guard";
@@ -41,19 +42,26 @@ export class AuthController {
     private readonly sessions: SessionService,
     private readonly google: GoogleService,
     private readonly csrf: CsrfService,
+    private readonly rateLimit: RateLimitService,
   ) {}
 
   @Get("google/start")
-  async startGoogle(@Res() response: Response) {
+  async startGoogle(@Req() request: Request, @Res() response: Response) {
+    await this.limit("google-start", request);
     const transaction = await this.google.start(
       OAuthTransactionPurpose.LOGIN_OR_SIGNUP,
     );
-    this.setOAuthCookie(response, transaction.bindingToken);
+    this.setOAuthCookie(
+      response,
+      transaction.cookieName,
+      transaction.bindingToken,
+    );
     response.redirect(transaction.url);
   }
 
   @Get("google/callback")
   async completeGoogle(@Req() request: Request, @Res() response: Response) {
+    await this.limit("google-callback", request, 20);
     const state =
       typeof request.query.state === "string" ? request.query.state : "";
     const code =
@@ -63,7 +71,12 @@ export class AuthController {
     const sessionToken = request.cookies?.[this.sessions.cookieName] as
       string | undefined;
     const purpose = await this.google.getPurpose(state);
-    const bindingToken = request.cookies?.[this.google.bindingCookieName] as
+    const stepUpSource =
+      request.cookies?.passkey_step_up_source === "recovery"
+        ? "recovery"
+        : "sign-in";
+    const bindingCookieName = this.google.bindingCookieName(state);
+    const bindingToken = request.cookies?.[bindingCookieName] as
       string | undefined;
     let result;
     try {
@@ -75,12 +88,13 @@ export class AuthController {
         bindingToken,
       );
     } catch (cause) {
-      response.clearCookie(this.google.bindingCookieName, {
+      response.clearCookie(bindingCookieName, {
         httpOnly: true,
         sameSite: "lax",
         secure: process.env.NODE_ENV === "production",
         path: "/",
       });
+      response.clearCookie("passkey_step_up_source", { path: "/" });
       if (
         purpose === OAuthTransactionPurpose.RECOVERY_RESTORE ||
         purpose === OAuthTransactionPurpose.STEP_UP
@@ -89,19 +103,24 @@ export class AuthController {
           purpose === OAuthTransactionPurpose.RECOVERY_RESTORE
             ? "recovery"
             : "step-up";
+        const source =
+          purpose === OAuthTransactionPurpose.STEP_UP
+            ? `&source=${stepUpSource}`
+            : "";
         response.redirect(
-          `${process.env.FRONTEND_ORIGIN ?? "http://localhost:3000"}/auth/result?status=error&flow=${flow}`,
+          `${process.env.FRONTEND_ORIGIN ?? "http://localhost:3000"}/auth/result?status=error&flow=${flow}${source}`,
         );
         return;
       }
       throw cause;
     }
-    response.clearCookie(this.google.bindingCookieName, {
+    response.clearCookie(bindingCookieName, {
       httpOnly: true,
       sameSite: "lax",
       secure: process.env.NODE_ENV === "production",
       path: "/",
     });
+    response.clearCookie("passkey_step_up_source", { path: "/" });
     this.setSessionCookie(response, result.token);
     if (result.purpose === OAuthTransactionPurpose.RECOVERY_RESTORE) {
       response.clearCookie("passkey_recovery", {
@@ -118,13 +137,21 @@ export class AuthController {
           ? "step-up"
           : "auth";
     const isNewAccount = result.isNewAccount ? "&new=1" : "";
+    const source =
+      result.purpose === OAuthTransactionPurpose.STEP_UP
+        ? `&source=${stepUpSource}`
+        : "";
     response.redirect(
-      `${process.env.FRONTEND_ORIGIN ?? "http://localhost:3000"}/auth/result?status=success&flow=${flow}${isNewAccount}`,
+      `${process.env.FRONTEND_ORIGIN ?? "http://localhost:3000"}/auth/result?status=success&flow=${flow}${isNewAccount}${source}`,
     );
   }
 
   @Post("passkey/registration/options")
-  async registrationOptions(@Body() body: RegistrationOptionsDto) {
+  async registrationOptions(
+    @Req() request: Request,
+    @Body() body: RegistrationOptionsDto,
+  ) {
+    await this.limit("passkey-registration", request);
     return {
       data: await this.passkeys.registrationOptions(body.displayName.trim()),
     };
@@ -132,9 +159,11 @@ export class AuthController {
 
   @Post("passkey/registration/verify")
   async verifyRegistration(
+    @Req() request: Request,
     @Body() body: VerifyPasskeyDto,
     @Res({ passthrough: true }) response: Response,
   ) {
+    await this.limit("passkey-registration", request);
     const token = await this.passkeys.verifyRegistration(
       body.challengeId,
       body.response,
@@ -144,15 +173,18 @@ export class AuthController {
   }
 
   @Post("passkey/authentication/options")
-  async authenticationOptions() {
+  async authenticationOptions(@Req() request: Request) {
+    await this.limit("passkey-login", request);
     return { data: await this.passkeys.authenticationOptions() };
   }
 
   @Post("passkey/authentication/verify")
   async verifyAuthentication(
+    @Req() request: Request,
     @Body() body: VerifyPasskeyDto,
     @Res({ passthrough: true }) response: Response,
   ) {
+    await this.limit("passkey-login", request);
     const token = await this.passkeys.verifyAuthentication(
       body.challengeId,
       body.response,
@@ -214,13 +246,26 @@ export class AuthController {
     });
   }
 
-  private setOAuthCookie(response: Response, token: string): void {
-    response.cookie(this.google.bindingCookieName, token, {
+  private setOAuthCookie(
+    response: Response,
+    cookieName: string,
+    token: string,
+  ): void {
+    response.cookie(cookieName, token, {
       httpOnly: true,
       sameSite: "lax",
       secure: process.env.NODE_ENV === "production",
       path: "/",
       maxAge: 300_000,
     });
+  }
+
+  private limit(scope: string, request: Request, limit = 10): Promise<void> {
+    return this.rateLimit.assertAllowed(
+      scope,
+      request.ip ?? "unknown",
+      limit,
+      60,
+    );
   }
 }

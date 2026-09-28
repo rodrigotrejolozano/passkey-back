@@ -25,8 +25,8 @@ export class GoogleService {
     private readonly config: ConfigService,
   ) {}
 
-  get bindingCookieName(): string {
-    return "passkey_oauth";
+  bindingCookieName(state: string): string {
+    return `passkey_oauth_${state}`;
   }
 
   async start(
@@ -34,7 +34,7 @@ export class GoogleService {
     userId?: string,
     sessionId?: string,
     recoverySessionId?: string,
-  ): Promise<{ url: string; bindingToken: string }> {
+  ): Promise<{ url: string; bindingToken: string; cookieName: string }> {
     const state = this.random.token();
     const nonce = this.random.token();
     const bindingToken = this.random.token();
@@ -57,8 +57,17 @@ export class GoogleService {
     url.searchParams.set("scope", "openid email profile");
     url.searchParams.set("state", state);
     url.searchParams.set("nonce", nonce);
-    url.searchParams.set("prompt", "select_account");
-    return { url: url.toString(), bindingToken };
+    if (purpose === OAuthTransactionPurpose.STEP_UP) {
+      url.searchParams.set("prompt", "login");
+      url.searchParams.set("max_age", "300");
+    } else {
+      url.searchParams.set("prompt", "select_account");
+    }
+    return {
+      url: url.toString(),
+      bindingToken,
+      cookieName: this.bindingCookieName(state),
+    };
   }
 
   async getPurpose(state: string): Promise<OAuthTransactionPurpose> {
@@ -120,6 +129,13 @@ export class GoogleService {
     });
     const claims = ticket.getPayload();
     if (!claims?.sub || claims.nonce !== transaction.nonce)
+      throw this.invalidTransaction();
+    const authTime = (claims as typeof claims & { auth_time?: unknown })
+      .auth_time;
+    if (
+      transaction.purpose === OAuthTransactionPurpose.STEP_UP &&
+      (typeof authTime !== "number" || authTime * 1000 < Date.now() - 300_000)
+    )
       throw this.invalidTransaction();
     const existing = await this.prisma.externalIdentity.findUnique({
       where: {

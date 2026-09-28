@@ -165,7 +165,7 @@ export class SecurityController {
       session.userId,
       session.id,
     );
-    response.cookie(this.google.bindingCookieName, transaction.bindingToken, {
+    response.cookie(transaction.cookieName, transaction.bindingToken, {
       httpOnly: true,
       sameSite: "lax",
       secure: process.env.NODE_ENV === "production",

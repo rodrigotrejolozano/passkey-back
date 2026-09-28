@@ -1,4 +1,4 @@
-import { Controller, Get, Req, Res, UseGuards } from "@nestjs/common";
+import { Controller, Get, Query, Req, Res, UseGuards } from "@nestjs/common";
 import type { Request, Response } from "express";
 
 import { OAuthTransactionPurpose } from "../generated/prisma/client";
@@ -15,7 +15,11 @@ export class GoogleStepUpController {
   ) {}
 
   @Get("start")
-  async start(@Req() request: Request, @Res() response: Response) {
+  async start(
+    @Req() request: Request,
+    @Query("source") source: string,
+    @Res() response: Response,
+  ) {
     const token =
       (request.cookies?.[this.sessions.cookieName] as string | undefined) ?? "";
     const session = await this.sessions.getActive(token);
@@ -24,13 +28,24 @@ export class GoogleStepUpController {
       session.userId,
       session.id,
     );
-    response.cookie(this.google.bindingCookieName, transaction.bindingToken, {
+    response.cookie(transaction.cookieName, transaction.bindingToken, {
       httpOnly: true,
       sameSite: "lax",
       secure: process.env.NODE_ENV === "production",
       path: "/",
       maxAge: 300_000,
     });
+    response.cookie(
+      "passkey_step_up_source",
+      source === "recovery" ? "recovery" : "sign-in",
+      {
+        httpOnly: true,
+        sameSite: "lax",
+        secure: process.env.NODE_ENV === "production",
+        path: "/",
+        maxAge: 300_000,
+      },
+    );
     response.redirect(transaction.url);
   }
 }

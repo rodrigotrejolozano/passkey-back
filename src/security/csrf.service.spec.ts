@@ -32,36 +32,27 @@ describe("CsrfService", () => {
       findUnique: recoveryFindUnique,
     },
   };
-  const random = { token: jest.fn(() => "raw-csrf-token") };
   const config = {
     getOrThrow: jest.fn((key: string) =>
       key === "CSRF_SECRET" ? "csrf-secret" : "session-secret",
     ),
   };
-  const service = new CsrfService(
-    prisma as never,
-    random as never,
-    config as never,
-  );
+  const service = new CsrfService(prisma as never, config as never);
 
   beforeEach(() => jest.clearAllMocks());
 
   it("stores only the hash when issuing a session token", async () => {
     sessionUpdateMany.mockResolvedValue({ count: 1 });
 
-    await expect(service.issueSessionToken("session-token")).resolves.toBe(
-      "raw-csrf-token",
-    );
+    const token = await service.issueSessionToken("session-token");
     const data = (
       sessionUpdateMany.mock.calls[0][0] as {
         data: { csrfTokenHash: string };
       }
     ).data;
-    expect(data.csrfTokenHash).not.toBe("raw-csrf-token");
+    expect(data.csrfTokenHash).not.toBe(token);
     expect(data.csrfTokenHash).toBe(
-      createHmac("sha256", "csrf-secret")
-        .update("raw-csrf-token")
-        .digest("base64url"),
+      createHmac("sha256", "csrf-secret").update(token).digest("base64url"),
     );
   });
 
@@ -101,17 +92,22 @@ describe("CsrfService", () => {
   });
 
   it("keeps recovery CSRF separate from normal sessions", async () => {
+    const token = createHmac("sha256", "csrf-secret")
+      .update("csrf:recovery-token")
+      .digest("base64url");
     recoveryUpdateMany.mockResolvedValue({ count: 1 });
     recoveryFindUnique.mockResolvedValue({
       csrfTokenHash: createHmac("sha256", "csrf-secret")
-        .update("raw-csrf-token")
+        .update(token)
         .digest("base64url"),
       consumedAt: null,
       revokedAt: null,
       expiresAt: new Date(Date.now() + 60_000),
     });
 
-    const token = await service.issueRecoveryToken("recovery-token");
+    await expect(service.issueRecoveryToken("recovery-token")).resolves.toBe(
+      token,
+    );
     await expect(
       service.requireRecoveryToken("recovery-token", token),
     ).resolves.toBeUndefined();

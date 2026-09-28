@@ -12,8 +12,9 @@ OAuth client. Never reuse local OAuth credentials or commit provider secrets.
 5. Set `BACKEND_ORIGIN=https://api.<ROOT_DOMAIN>`.
 6. Set `WEBAUTHN_RP_ID=app.<ROOT_DOMAIN>` and
    `WEBAUTHN_ORIGIN=https://app.<ROOT_DOMAIN>`.
-7. Review every pending SQL migration before deployment. Render runs
-   `npm run prisma:migrate:deploy` once as its pre-deploy command.
+7. Review every pending SQL migration before deployment. The free Render plan
+   runs the idempotent `npm run prisma:migrate:deploy` command before starting
+   the API process.
 
 Never run `prisma migrate dev` against the demo database.
 
@@ -41,7 +42,9 @@ the callback only after both application domains resolve over HTTPS.
 Run the Playwright suite against the deployed frontend:
 
 ```bash
-PLAYWRIGHT_BASE_URL=https://app.<ROOT_DOMAIN> npm run test:e2e
+PLAYWRIGHT_BASE_URL=https://app.<ROOT_DOMAIN> \
+PLAYWRIGHT_API_ORIGIN=https://api.<ROOT_DOMAIN> \
+npm run test:e2e
 ```
 
 Then manually verify real Passkey registration/login, Google, OTP, Magic Link,
