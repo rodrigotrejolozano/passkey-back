@@ -4,6 +4,7 @@ import {
   Controller,
   Delete,
   Get,
+  Patch,
   Post,
   Req,
   Res,
@@ -24,6 +25,12 @@ class VerifyPasskeyDto {
 
   @IsObject()
   response!: Record<string, unknown>;
+}
+
+class UpdateProfileDto {
+  @IsString()
+  @IsNotEmpty()
+  displayName!: string;
 }
 
 @Controller("security")
@@ -98,6 +105,28 @@ export class SecurityController {
       select: { providerEmail: true, createdAt: true },
     });
     return { data: { identity } };
+  }
+
+  @Get("profile")
+  async profile(@Req() request: Request) {
+    const session = await this.currentSession(request);
+    return {
+      data: {
+        displayName: session.user.displayName,
+        createdAt: session.user.createdAt,
+      },
+    };
+  }
+
+  @Patch("profile")
+  async updateProfile(@Req() request: Request, @Body() body: UpdateProfileDto) {
+    const session = await this.currentSession(request);
+    const user = await this.prisma.user.update({
+      where: { id: session.userId },
+      data: { displayName: body.displayName.trim() },
+      select: { displayName: true },
+    });
+    return { data: user };
   }
 
   @Get("google/connect")
