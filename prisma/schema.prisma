@@ -101,12 +101,14 @@ model RecoveryCode {
   userId        String
   codeHash      String
   batchId       String
+  expiresAt     DateTime
   usedAt        DateTime?
   invalidatedAt DateTime?
   createdAt     DateTime  @default(now())
   user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, batchId])
+  @@index([expiresAt])
 }
 
 model EmailChallenge {

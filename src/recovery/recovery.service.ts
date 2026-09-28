@@ -283,6 +283,7 @@ export class RecoveryService {
   async generateRecoveryCodes(userId: string): Promise<string[]> {
     const batchId = this.random.token();
     const codes = Array.from({ length: 10 }, () => this.recoveryCode());
+    const expiresAt = new Date(Date.now() + 300_000);
     await this.prisma.$transaction(async (transaction) => {
       await transaction.recoveryCode.updateMany({
         where: { userId, usedAt: null, invalidatedAt: null },
@@ -293,6 +294,7 @@ export class RecoveryService {
           userId,
           batchId,
           codeHash: this.hash(code),
+          expiresAt,
         })),
       });
     });
@@ -305,11 +307,17 @@ export class RecoveryService {
         codeHash: this.hash(code.replace(/\s/g, "").toUpperCase()),
         usedAt: null,
         invalidatedAt: null,
+        expiresAt: { gt: new Date() },
       },
     });
     if (!recoveryCode) throw this.invalidCode();
     const used = await this.prisma.recoveryCode.updateMany({
-      where: { id: recoveryCode.id, usedAt: null, invalidatedAt: null },
+      where: {
+        id: recoveryCode.id,
+        usedAt: null,
+        invalidatedAt: null,
+        expiresAt: { gt: new Date() },
+      },
       data: { usedAt: new Date() },
     });
     if (used.count !== 1) throw this.invalidCode();
