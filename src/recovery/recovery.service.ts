@@ -33,24 +33,35 @@ export class RecoveryService {
     private readonly config: ConfigService,
   ) {}
 
-  async requestRecoveryEmailVerification(userId: string, email: string) {
+  async requestRecoveryEmailVerification(
+    userId: string,
+    email: string,
+    deliveryMethod: EmailDeliveryMethod = EmailDeliveryMethod.OTP,
+  ) {
     const normalizedEmail = email.trim().toLowerCase();
-    const code = String(randomInt(0, 1_000_000)).padStart(6, "0");
+    const secret =
+      deliveryMethod === EmailDeliveryMethod.OTP
+        ? String(randomInt(0, 1_000_000)).padStart(6, "0")
+        : this.random.token();
     const challenge = await this.prisma.emailChallenge.create({
       data: {
         userId,
         targetEmail: email.trim(),
         normalizedTargetEmail: normalizedEmail,
         purpose: EmailChallengePurpose.RECOVERY_EMAIL_VERIFICATION,
-        deliveryMethod: EmailDeliveryMethod.OTP,
-        secretHash: this.hash(code),
+        deliveryMethod,
+        secretHash: this.hash(secret),
         expiresAt: new Date(Date.now() + 300_000),
       },
     });
+    const text =
+      deliveryMethod === EmailDeliveryMethod.OTP
+        ? `Your verification code is ${secret}. It expires in 5 minutes.`
+        : `Use this secure link to verify your recovery email:\n\n${this.magicLink("/api/security/recovery-email/verification/link", challenge.id, secret)}\n\nThis link expires in 5 minutes and can only be used once.`;
     await this.email.send({
       to: email.trim(),
       subject: "Verify your recovery email",
-      text: `Your verification code is ${code}. It expires in 5 minutes.`,
+      text,
     });
     return { challengeId: challenge.id };
   }
@@ -101,6 +112,47 @@ export class RecoveryService {
     });
   }
 
+  async verifyRecoveryEmailMagicLink(challengeId: string, token: string) {
+    const challenge = await this.prisma.emailChallenge.findFirst({
+      where: {
+        id: challengeId,
+        purpose: EmailChallengePurpose.RECOVERY_EMAIL_VERIFICATION,
+        deliveryMethod: EmailDeliveryMethod.MAGIC_LINK,
+        consumedAt: null,
+        expiresAt: { gt: new Date() },
+      },
+    });
+    if (!challenge?.userId || this.hash(token) !== challenge.secretHash)
+      throw this.invalidCode();
+    const existing = await this.prisma.recoveryEmail.findUnique({
+      where: { normalizedEmail: challenge.normalizedTargetEmail },
+      select: { userId: true },
+    });
+    if (existing && existing.userId !== challenge.userId)
+      throw this.invalidCode();
+    await this.prisma.$transaction(async (transaction) => {
+      const consumed = await transaction.emailChallenge.updateMany({
+        where: { id: challenge.id, consumedAt: null },
+        data: { consumedAt: new Date() },
+      });
+      if (consumed.count !== 1) throw this.invalidCode();
+      await transaction.recoveryEmail.upsert({
+        where: { userId: challenge.userId! },
+        create: {
+          userId: challenge.userId!,
+          email: challenge.targetEmail,
+          normalizedEmail: challenge.normalizedTargetEmail,
+          verifiedAt: new Date(),
+        },
+        update: {
+          email: challenge.targetEmail,
+          normalizedEmail: challenge.normalizedTargetEmail,
+          verifiedAt: new Date(),
+        },
+      });
+    });
+  }
+
   async removeRecoveryEmail(userId: string) {
     await this.prisma.recoveryEmail.deleteMany({ where: { userId } });
   }
@@ -112,27 +164,37 @@ export class RecoveryService {
     });
   }
 
-  async requestPublicRecovery(email: string): Promise<void> {
+  async requestPublicRecovery(
+    email: string,
+    deliveryMethod: EmailDeliveryMethod = EmailDeliveryMethod.OTP,
+  ): Promise<void> {
     const recoveryEmail = await this.prisma.recoveryEmail.findUnique({
       where: { normalizedEmail: email.trim().toLowerCase() },
     });
     if (!recoveryEmail) return;
-    const code = String(randomInt(0, 1_000_000)).padStart(6, "0");
-    await this.prisma.emailChallenge.create({
+    const secret =
+      deliveryMethod === EmailDeliveryMethod.OTP
+        ? String(randomInt(0, 1_000_000)).padStart(6, "0")
+        : this.random.token();
+    const challenge = await this.prisma.emailChallenge.create({
       data: {
         userId: recoveryEmail.userId,
         targetEmail: recoveryEmail.email,
         normalizedTargetEmail: recoveryEmail.normalizedEmail,
         purpose: EmailChallengePurpose.ACCOUNT_RECOVERY,
-        deliveryMethod: EmailDeliveryMethod.OTP,
-        secretHash: this.hash(code),
+        deliveryMethod,
+        secretHash: this.hash(secret),
         expiresAt: new Date(Date.now() + 300_000),
       },
     });
+    const text =
+      deliveryMethod === EmailDeliveryMethod.OTP
+        ? `Your recovery code is ${secret}. It expires in 5 minutes.`
+        : `Use this secure link to continue account recovery:\n\n${this.magicLink("/api/recovery/email/verify-link", challenge.id, secret)}\n\nThis link expires in 5 minutes and can only be used once. It does not sign you in.`;
     await this.email.send({
       to: recoveryEmail.email,
       subject: "Recover your account",
-      text: `Your recovery code is ${code}. It expires in 5 minutes.`,
+      text,
     });
   }
 
@@ -154,18 +216,30 @@ export class RecoveryService {
       data: { consumedAt: new Date() },
     });
     if (consumed.count !== 1) throw this.invalidCode();
-    const token = this.random.token();
-    const timeoutMinutes = Number(
-      this.config.get("RECOVERY_SESSION_TIMEOUT_MINUTES") ?? 15,
-    );
-    await this.prisma.recoverySession.create({
-      data: {
-        userId: challenge.userId,
-        tokenHash: this.hash(token),
-        expiresAt: new Date(Date.now() + timeoutMinutes * 60_000),
+    return this.createRecoverySession(challenge.userId);
+  }
+
+  async verifyPublicRecoveryMagicLink(
+    challengeId: string,
+    token: string,
+  ): Promise<string> {
+    const challenge = await this.prisma.emailChallenge.findFirst({
+      where: {
+        id: challengeId,
+        purpose: EmailChallengePurpose.ACCOUNT_RECOVERY,
+        deliveryMethod: EmailDeliveryMethod.MAGIC_LINK,
+        consumedAt: null,
+        expiresAt: { gt: new Date() },
       },
     });
-    return token;
+    if (!challenge?.userId || this.hash(token) !== challenge.secretHash)
+      throw this.invalidCode();
+    const consumed = await this.prisma.emailChallenge.updateMany({
+      where: { id: challenge.id, consumedAt: null },
+      data: { consumedAt: new Date() },
+    });
+    if (consumed.count !== 1) throw this.invalidCode();
+    return this.createRecoverySession(challenge.userId);
   }
 
   async getActiveRecoverySession(token: string) {
@@ -220,18 +294,7 @@ export class RecoveryService {
       data: { usedAt: new Date() },
     });
     if (used.count !== 1) throw this.invalidCode();
-    const token = this.random.token();
-    const timeoutMinutes = Number(
-      this.config.get("RECOVERY_SESSION_TIMEOUT_MINUTES") ?? 15,
-    );
-    await this.prisma.recoverySession.create({
-      data: {
-        userId: recoveryCode.userId,
-        tokenHash: this.hash(token),
-        expiresAt: new Date(Date.now() + timeoutMinutes * 60_000),
-      },
-    });
-    return token;
+    return this.createRecoverySession(recoveryCode.userId);
   }
 
   async restorePasskeyOptions(recoveryToken: string) {
@@ -328,6 +391,31 @@ export class RecoveryService {
 
   private recoveryCode() {
     return randomBytes(8).toString("hex").toUpperCase();
+  }
+
+  private async createRecoverySession(userId: string): Promise<string> {
+    const token = this.random.token();
+    const timeoutMinutes = Number(
+      this.config.get("RECOVERY_SESSION_TIMEOUT_MINUTES") ?? 5,
+    );
+    await this.prisma.recoverySession.create({
+      data: {
+        userId,
+        tokenHash: this.hash(token),
+        expiresAt: new Date(Date.now() + timeoutMinutes * 60_000),
+      },
+    });
+    return token;
+  }
+
+  private magicLink(path: string, challengeId: string, token: string): string {
+    const url = new URL(
+      path,
+      this.config.get<string>("BACKEND_ORIGIN") ?? "http://localhost:3001",
+    );
+    url.searchParams.set("challengeId", challengeId);
+    url.searchParams.set("token", token);
+    return url.toString();
   }
 
   private get rpId() {

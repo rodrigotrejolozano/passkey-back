@@ -1,12 +1,32 @@
-import { Body, Controller, Delete, Get, Post, Req } from "@nestjs/common";
-import { IsEmail, IsNotEmpty, IsString } from "class-validator";
-import type { Request } from "express";
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Post,
+  Query,
+  Req,
+  Res,
+} from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
+import {
+  IsEmail,
+  IsEnum,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+} from "class-validator";
+import type { Request, Response } from "express";
 
+import { EmailDeliveryMethod } from "../generated/prisma/client";
 import { SessionService } from "../sessions/session.service";
 import { RecoveryService } from "./recovery.service";
 
 class RequestRecoveryEmailDto {
   @IsEmail() email!: string;
+  @IsOptional()
+  @IsEnum(EmailDeliveryMethod)
+  deliveryMethod?: EmailDeliveryMethod;
 }
 class VerifyRecoveryEmailDto {
   @IsString() @IsNotEmpty() challengeId!: string;
@@ -18,6 +38,7 @@ export class RecoveryController {
   constructor(
     private readonly recovery: RecoveryService,
     private readonly sessions: SessionService,
+    private readonly config: ConfigService,
   ) {}
 
   @Get()
@@ -38,8 +59,30 @@ export class RecoveryController {
       data: await this.recovery.requestRecoveryEmailVerification(
         session.userId,
         body.email,
+        body.deliveryMethod,
       ),
     };
+  }
+
+  @Get("verification/link")
+  async confirmMagicLink(
+    @Query("challengeId") challengeId: string,
+    @Query("token") token: string,
+    @Res() response: Response,
+  ) {
+    try {
+      await this.recovery.verifyRecoveryEmailMagicLink(
+        challengeId ?? "",
+        token ?? "",
+      );
+      response.redirect(
+        `${this.frontendOrigin}/auth/result?status=success&flow=recovery-email`,
+      );
+    } catch {
+      response.redirect(
+        `${this.frontendOrigin}/auth/result?status=error&flow=recovery-email`,
+      );
+    }
   }
 
   @Post("verification/confirm")
@@ -80,5 +123,11 @@ export class RecoveryController {
     const token = request.cookies?.[this.sessions.cookieName] as
       string | undefined;
     return this.sessions.getActive(token ?? "");
+  }
+
+  private get frontendOrigin() {
+    return (
+      this.config.get<string>("FRONTEND_ORIGIN") ?? "http://localhost:3000"
+    );
   }
 }

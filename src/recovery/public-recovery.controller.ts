@@ -1,13 +1,27 @@
-import { Body, Controller, Get, Post, Req, Res } from "@nestjs/common";
-import { IsEmail, IsNotEmpty, IsObject, IsString } from "class-validator";
+import { Body, Controller, Get, Post, Query, Req, Res } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
+import {
+  IsEmail,
+  IsEnum,
+  IsNotEmpty,
+  IsObject,
+  IsOptional,
+  IsString,
+} from "class-validator";
 import type { Request, Response } from "express";
 
-import { OAuthTransactionPurpose } from "../generated/prisma/client";
+import {
+  EmailDeliveryMethod,
+  OAuthTransactionPurpose,
+} from "../generated/prisma/client";
 import { GoogleService } from "../google/google.service";
 import { RecoveryService } from "./recovery.service";
 
 class PublicRecoveryDto {
   @IsEmail() email!: string;
+  @IsOptional()
+  @IsEnum(EmailDeliveryMethod)
+  deliveryMethod?: EmailDeliveryMethod;
 }
 class PublicRecoveryVerifyDto {
   @IsEmail() email!: string;
@@ -27,11 +41,12 @@ export class PublicRecoveryController {
   constructor(
     private readonly recovery: RecoveryService,
     private readonly google: GoogleService,
+    private readonly config: ConfigService,
   ) {}
 
   @Post("request")
   async request(@Body() body: PublicRecoveryDto) {
-    await this.recovery.requestPublicRecovery(body.email);
+    await this.recovery.requestPublicRecovery(body.email, body.deliveryMethod);
     return { data: { accepted: true } };
   }
 
@@ -44,12 +59,7 @@ export class PublicRecoveryController {
       body.email,
       body.code,
     );
-    response.cookie("passkey_recovery", token, {
-      httpOnly: true,
-      sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
-      path: "/",
-    });
+    this.setRecoveryCookie(response, token);
     return { data: { verified: true } };
   }
 
@@ -59,12 +69,7 @@ export class PublicRecoveryController {
     @Res({ passthrough: true }) response: Response,
   ) {
     const token = await this.recovery.verifyRecoveryCode(body.code);
-    response.cookie("passkey_recovery", token, {
-      httpOnly: true,
-      sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
-      path: "/",
-    });
+    this.setRecoveryCookie(response, token);
     return { data: { verified: true } };
   }
 
@@ -118,7 +123,48 @@ export class PublicRecoveryController {
     );
   }
 
+  @Get("email/verify-link")
+  async verifyMagicLink(
+    @Query("challengeId") challengeId: string,
+    @Query("token") token: string,
+    @Res() response: Response,
+  ) {
+    try {
+      const recoveryToken = await this.recovery.verifyPublicRecoveryMagicLink(
+        challengeId ?? "",
+        token ?? "",
+      );
+      this.setRecoveryCookie(response, recoveryToken);
+      response.redirect(
+        `${this.frontendOrigin}/auth/result?status=success&flow=account-recovery`,
+      );
+    } catch {
+      response.redirect(
+        `${this.frontendOrigin}/auth/result?status=error&flow=account-recovery`,
+      );
+    }
+  }
+
   private recoveryToken(request: Request) {
     return (request.cookies?.passkey_recovery as string | undefined) ?? "";
+  }
+
+  private setRecoveryCookie(response: Response, token: string) {
+    const timeoutMinutes = Number(
+      this.config.get("RECOVERY_SESSION_TIMEOUT_MINUTES") ?? 5,
+    );
+    response.cookie("passkey_recovery", token, {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      path: "/",
+      maxAge: timeoutMinutes * 60_000,
+    });
+  }
+
+  private get frontendOrigin() {
+    return (
+      this.config.get<string>("FRONTEND_ORIGIN") ?? "http://localhost:3000"
+    );
   }
 }
