@@ -45,9 +45,11 @@ export class AuthController {
 
   @Get("google/start")
   async startGoogle(@Res() response: Response) {
-    response.redirect(
-      await this.google.start(OAuthTransactionPurpose.LOGIN_OR_SIGNUP),
+    const transaction = await this.google.start(
+      OAuthTransactionPurpose.LOGIN_OR_SIGNUP,
     );
+    this.setOAuthCookie(response, transaction.bindingToken);
+    response.redirect(transaction.url);
   }
 
   @Get("google/callback")
@@ -61,6 +63,8 @@ export class AuthController {
     const sessionToken = request.cookies?.[this.sessions.cookieName] as
       string | undefined;
     const purpose = await this.google.getPurpose(state);
+    const bindingToken = request.cookies?.[this.google.bindingCookieName] as
+      string | undefined;
     let result;
     try {
       result = await this.google.complete(
@@ -68,8 +72,15 @@ export class AuthController {
         code,
         recoveryToken,
         sessionToken,
+        bindingToken,
       );
     } catch (cause) {
+      response.clearCookie(this.google.bindingCookieName, {
+        httpOnly: true,
+        sameSite: "lax",
+        secure: process.env.NODE_ENV === "production",
+        path: "/",
+      });
       if (
         purpose === OAuthTransactionPurpose.RECOVERY_RESTORE ||
         purpose === OAuthTransactionPurpose.STEP_UP
@@ -85,6 +96,12 @@ export class AuthController {
       }
       throw cause;
     }
+    response.clearCookie(this.google.bindingCookieName, {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      path: "/",
+    });
     this.setSessionCookie(response, result.token);
     if (result.purpose === OAuthTransactionPurpose.RECOVERY_RESTORE) {
       response.clearCookie("passkey_recovery", {
@@ -194,6 +211,16 @@ export class AuthController {
       sameSite: "lax",
       secure: process.env.NODE_ENV === "production",
       path: "/",
+    });
+  }
+
+  private setOAuthCookie(response: Response, token: string): void {
+    response.cookie(this.google.bindingCookieName, token, {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      path: "/",
+      maxAge: 300_000,
     });
   }
 }

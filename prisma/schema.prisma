@@ -191,6 +191,7 @@ model OAuthTransaction {
   id                String                  @id @default(cuid())
   state             String                  @unique
   nonce             String                  @unique
+  browserBindingHash String
   purpose           OAuthTransactionPurpose
   userId            String?
   sessionId         String?

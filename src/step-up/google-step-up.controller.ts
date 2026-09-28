@@ -19,12 +19,18 @@ export class GoogleStepUpController {
     const token =
       (request.cookies?.[this.sessions.cookieName] as string | undefined) ?? "";
     const session = await this.sessions.getActive(token);
-    response.redirect(
-      await this.google.start(
-        OAuthTransactionPurpose.STEP_UP,
-        session.userId,
-        session.id,
-      ),
+    const transaction = await this.google.start(
+      OAuthTransactionPurpose.STEP_UP,
+      session.userId,
+      session.id,
     );
+    response.cookie(this.google.bindingCookieName, transaction.bindingToken, {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      path: "/",
+      maxAge: 300_000,
+    });
+    response.redirect(transaction.url);
   }
 }

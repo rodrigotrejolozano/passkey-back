@@ -25,18 +25,24 @@ export class GoogleService {
     private readonly config: ConfigService,
   ) {}
 
+  get bindingCookieName(): string {
+    return "passkey_oauth";
+  }
+
   async start(
     purpose: OAuthTransactionPurpose,
     userId?: string,
     sessionId?: string,
     recoverySessionId?: string,
-  ): Promise<string> {
+  ): Promise<{ url: string; bindingToken: string }> {
     const state = this.random.token();
     const nonce = this.random.token();
+    const bindingToken = this.random.token();
     await this.prisma.oAuthTransaction.create({
       data: {
         state,
         nonce,
+        browserBindingHash: this.hash(bindingToken),
         purpose,
         userId,
         sessionId,
@@ -52,7 +58,7 @@ export class GoogleService {
     url.searchParams.set("state", state);
     url.searchParams.set("nonce", nonce);
     url.searchParams.set("prompt", "select_account");
-    return url.toString();
+    return { url: url.toString(), bindingToken };
   }
 
   async getPurpose(state: string): Promise<OAuthTransactionPurpose> {
@@ -74,6 +80,7 @@ export class GoogleService {
     code: string,
     recoveryToken?: string,
     sessionToken?: string,
+    bindingToken?: string,
   ): Promise<{
     token: string;
     isNewAccount: boolean;
@@ -84,6 +91,8 @@ export class GoogleService {
     });
     if (
       !transaction ||
+      !bindingToken ||
+      transaction.browserBindingHash !== this.hash(bindingToken) ||
       transaction.consumedAt ||
       transaction.expiresAt <= new Date()
     )
@@ -91,6 +100,7 @@ export class GoogleService {
     const consumed = await this.prisma.oAuthTransaction.updateMany({
       where: {
         id: transaction.id,
+        browserBindingHash: this.hash(bindingToken),
         consumedAt: null,
         expiresAt: { gt: new Date() },
       },

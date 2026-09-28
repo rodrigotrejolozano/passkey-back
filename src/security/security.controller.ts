@@ -160,13 +160,19 @@ export class SecurityController {
   async connectGoogle(@Req() request: Request, @Res() response: Response) {
     const session = await this.currentSession(request);
     await this.sessions.requireStepUp(session.id);
-    response.redirect(
-      await this.google.start(
-        OAuthTransactionPurpose.LINK,
-        session.userId,
-        session.id,
-      ),
+    const transaction = await this.google.start(
+      OAuthTransactionPurpose.LINK,
+      session.userId,
+      session.id,
     );
+    response.cookie(this.google.bindingCookieName, transaction.bindingToken, {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      path: "/",
+      maxAge: 300_000,
+    });
+    response.redirect(transaction.url);
   }
 
   @Delete("google")

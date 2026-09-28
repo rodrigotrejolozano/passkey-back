@@ -163,14 +163,20 @@ export class PublicRecoveryController {
       const recoverySession = await this.recovery.getActiveRecoverySession(
         this.recoveryToken(request),
       );
-      response.redirect(
-        await this.google.start(
-          OAuthTransactionPurpose.RECOVERY_RESTORE,
-          recoverySession.userId,
-          undefined,
-          recoverySession.id,
-        ),
+      const transaction = await this.google.start(
+        OAuthTransactionPurpose.RECOVERY_RESTORE,
+        recoverySession.userId,
+        undefined,
+        recoverySession.id,
       );
+      response.cookie(this.google.bindingCookieName, transaction.bindingToken, {
+        httpOnly: true,
+        sameSite: "lax",
+        secure: process.env.NODE_ENV === "production",
+        path: "/",
+        maxAge: 300_000,
+      });
+      response.redirect(transaction.url);
     } catch {
       response.redirect(
         `${this.frontendOrigin}/auth/result?status=error&flow=recovery`,
