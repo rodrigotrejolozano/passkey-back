@@ -99,6 +99,7 @@ model RecoveryEmail {
 model RecoveryCode {
   id            String    @id @default(cuid())
   userId        String
+  lookupKey     String    @unique
   codeHash      String
   batchId       String
   expiresAt     DateTime

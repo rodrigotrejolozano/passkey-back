@@ -8,7 +8,13 @@ import {
   generateRegistrationOptions,
   verifyRegistrationResponse,
 } from "@simplewebauthn/server";
-import { createHmac, randomBytes, randomInt } from "node:crypto";
+import {
+  argon2,
+  createHmac,
+  randomBytes,
+  randomInt,
+  timingSafeEqual,
+} from "node:crypto";
 
 import { ChallengeStore } from "../challenges/challenge.store";
 import { RandomSource } from "../common/random-source";
@@ -50,7 +56,7 @@ export class RecoveryService {
         normalizedTargetEmail: normalizedEmail,
         purpose: EmailChallengePurpose.RECOVERY_EMAIL_VERIFICATION,
         deliveryMethod,
-        secretHash: this.hash(secret),
+        secretHash: await this.hashSecret(secret),
         expiresAt: new Date(Date.now() + 300_000),
       },
     });
@@ -99,7 +105,8 @@ export class RecoveryService {
       data: { consumedAt: new Date() },
     });
     if (consumed.count !== 1) throw this.invalidCode();
-    if (this.hash(code) !== challenge.secretHash) throw this.invalidCode();
+    if (!(await this.verifySecret(challenge.secretHash, code)))
+      throw this.invalidCode();
     await this.prisma.recoveryEmail.upsert({
       where: { userId },
       create: {
@@ -133,7 +140,7 @@ export class RecoveryService {
     });
     if (existing && existing.userId !== challenge.userId)
       throw this.invalidCode();
-    await this.prisma.$transaction(async (transaction) => {
+    const verified = await this.prisma.$transaction(async (transaction) => {
       const consumed = await transaction.emailChallenge.updateMany({
         where: {
           id: challenge.id,
@@ -143,7 +150,7 @@ export class RecoveryService {
         data: { consumedAt: new Date() },
       });
       if (consumed.count !== 1) throw this.invalidCode();
-      if (this.hash(token) !== challenge.secretHash) return;
+      if (!(await this.verifySecret(challenge.secretHash, token))) return false;
       await transaction.recoveryEmail.upsert({
         where: { userId: challenge.userId! },
         create: {
@@ -158,8 +165,9 @@ export class RecoveryService {
           verifiedAt: new Date(),
         },
       });
+      return true;
     });
-    if (this.hash(token) !== challenge.secretHash) throw this.invalidCode();
+    if (!verified) throw this.invalidCode();
   }
 
   async removeRecoveryEmail(userId: string) {
@@ -192,7 +200,7 @@ export class RecoveryService {
         normalizedTargetEmail: recoveryEmail.normalizedEmail,
         purpose: EmailChallengePurpose.ACCOUNT_RECOVERY,
         deliveryMethod,
-        secretHash: this.hash(secret),
+        secretHash: await this.hashSecret(secret),
         expiresAt: new Date(Date.now() + 300_000),
       },
     });
@@ -230,7 +238,8 @@ export class RecoveryService {
       data: { consumedAt: new Date() },
     });
     if (consumed.count !== 1) throw this.invalidCode();
-    if (this.hash(code) !== challenge.secretHash) throw this.invalidCode();
+    if (!(await this.verifySecret(challenge.secretHash, code)))
+      throw this.invalidCode();
     return this.createRecoverySession(challenge.userId);
   }
 
@@ -257,7 +266,8 @@ export class RecoveryService {
       data: { consumedAt: new Date() },
     });
     if (consumed.count !== 1) throw this.invalidCode();
-    if (this.hash(token) !== challenge.secretHash) throw this.invalidCode();
+    if (!(await this.verifySecret(challenge.secretHash, token)))
+      throw this.invalidCode();
     return this.createRecoverySession(challenge.userId);
   }
 
@@ -284,33 +294,45 @@ export class RecoveryService {
     const batchId = this.random.token();
     const codes = Array.from({ length: 10 }, () => this.recoveryCode());
     const expiresAt = new Date(Date.now() + 300_000);
+    const records = await Promise.all(
+      codes.map(async (code) => ({
+        userId,
+        batchId,
+        lookupKey: code.lookupKey,
+        codeHash: await this.hashSecret(code.secret),
+        expiresAt,
+      })),
+    );
     await this.prisma.$transaction(async (transaction) => {
       await transaction.recoveryCode.updateMany({
         where: { userId, usedAt: null, invalidatedAt: null },
         data: { invalidatedAt: new Date() },
       });
       await transaction.recoveryCode.createMany({
-        data: codes.map((code) => ({
-          userId,
-          batchId,
-          codeHash: this.hash(code),
-          expiresAt,
-        })),
+        data: records,
       });
     });
-    return codes;
+    return codes.map((code) => code.display);
   }
 
   async verifyRecoveryCode(code: string): Promise<string> {
-    const recoveryCode = await this.prisma.recoveryCode.findFirst({
+    const [lookupKey, secret, ...extra] = code
+      .replace(/\s/g, "")
+      .toUpperCase()
+      .split(".");
+    if (!lookupKey || !secret || extra.length) throw this.invalidCode();
+    const recoveryCode = await this.prisma.recoveryCode.findUnique({
       where: {
-        codeHash: this.hash(code.replace(/\s/g, "").toUpperCase()),
-        usedAt: null,
-        invalidatedAt: null,
-        expiresAt: { gt: new Date() },
+        lookupKey,
       },
     });
-    if (!recoveryCode) throw this.invalidCode();
+    if (
+      !recoveryCode ||
+      recoveryCode.usedAt ||
+      recoveryCode.invalidatedAt ||
+      recoveryCode.expiresAt <= new Date()
+    )
+      throw this.invalidCode();
     const used = await this.prisma.recoveryCode.updateMany({
       where: {
         id: recoveryCode.id,
@@ -321,6 +343,8 @@ export class RecoveryService {
       data: { usedAt: new Date() },
     });
     if (used.count !== 1) throw this.invalidCode();
+    if (!(await this.verifySecret(recoveryCode.codeHash, secret)))
+      throw this.invalidCode();
     return this.createRecoverySession(recoveryCode.userId);
   }
 
@@ -422,7 +446,45 @@ export class RecoveryService {
   }
 
   private recoveryCode() {
-    return randomBytes(8).toString("hex").toUpperCase();
+    const lookupKey = randomBytes(6).toString("hex").toUpperCase();
+    const secret = randomBytes(16).toString("hex").toUpperCase();
+    return { lookupKey, secret, display: `${lookupKey}.${secret}` };
+  }
+
+  private async hashSecret(value: string): Promise<string> {
+    const salt = randomBytes(16);
+    const digest = await this.argon2id(value, salt);
+    return `${salt.toString("base64url")}.${digest.toString("base64url")}`;
+  }
+
+  private async verifySecret(hash: string, value: string): Promise<boolean> {
+    const [encodedSalt, encodedDigest] = hash.split(".");
+    if (!encodedSalt || !encodedDigest) return false;
+    const expected = Buffer.from(encodedDigest, "base64url");
+    const actual = await this.argon2id(
+      value,
+      Buffer.from(encodedSalt, "base64url"),
+    );
+    return (
+      expected.length === actual.length && timingSafeEqual(expected, actual)
+    );
+  }
+
+  private argon2id(value: string, salt: Buffer): Promise<Buffer> {
+    return new Promise((resolve, reject) => {
+      argon2(
+        "argon2id",
+        {
+          message: Buffer.from(value),
+          nonce: salt,
+          parallelism: 1,
+          tagLength: 32,
+          memory: 65_536,
+          passes: 3,
+        },
+        (error, result) => (error ? reject(error) : resolve(result)),
+      );
+    });
   }
 
   private async createRecoverySession(userId: string): Promise<string> {
