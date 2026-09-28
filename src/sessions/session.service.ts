@@ -1,4 +1,8 @@
-import { Injectable, UnauthorizedException } from "@nestjs/common";
+import {
+  ForbiddenException,
+  Injectable,
+  UnauthorizedException,
+} from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { createHmac } from "node:crypto";
 
@@ -108,6 +112,28 @@ export class SessionService {
     await this.prisma.session.updateMany({
       where: { userId, id: { not: currentSessionId }, revokedAt: null },
       data: { revokedAt: new Date() },
+    });
+  }
+
+  async requireStepUp(sessionId: string): Promise<void> {
+    const session = await this.prisma.session.findUnique({
+      where: { id: sessionId },
+    });
+    if (!session?.stepUpExpiresAt || session.stepUpExpiresAt <= new Date()) {
+      throw new ForbiddenException({
+        error: {
+          code: "STEP_UP_REQUIRED",
+          message: "Verify it is you to continue.",
+        },
+      });
+    }
+  }
+
+  async markStepUp(sessionId: string): Promise<void> {
+    const ttlMinutes = Number(this.config.get("STEP_UP_TTL_MINUTES") ?? 5);
+    await this.prisma.session.update({
+      where: { id: sessionId },
+      data: { stepUpExpiresAt: new Date(Date.now() + ttlMinutes * 60_000) },
     });
   }
 

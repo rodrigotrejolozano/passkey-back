@@ -115,6 +115,89 @@ export class PasskeyService {
     return { challengeId: challenge.id, options };
   }
 
+  async stepUpOptions(sessionId: string, userId: string) {
+    const credentials = await this.prisma.passkeyCredential.findMany({
+      where: { userId },
+      select: { credentialId: true, transports: true },
+    });
+    const options = await generateAuthenticationOptions({
+      rpID: this.rpId,
+      userVerification: "required",
+      allowCredentials: credentials.map((credential) => ({
+        id: credential.credentialId,
+        transports: credential.transports as never,
+      })),
+    });
+    const challenge = await this.challenges.create({
+      challenge: options.challenge,
+      type: WebAuthnChallengeType.AUTHENTICATION,
+      sessionId,
+      expiresAt: this.challengeExpiry,
+    });
+    return { challengeId: challenge.id, options };
+  }
+
+  async verifyStepUp(
+    challengeId: string,
+    sessionId: string,
+    response: { id?: string } & Record<string, unknown>,
+  ): Promise<void> {
+    const challenge = await this.challenges.consume(challengeId, new Date());
+    if (
+      !challenge ||
+      challenge.sessionId !== sessionId ||
+      challenge.type !== WebAuthnChallengeType.AUTHENTICATION ||
+      !response.id
+    )
+      throw new BadRequestException({
+        error: {
+          code: "CHALLENGE_INVALID",
+          message: "This passkey request is no longer valid.",
+        },
+      });
+    const credential = await this.prisma.passkeyCredential.findUnique({
+      where: { credentialId: response.id },
+    });
+    const session = await this.prisma.session.findUnique({
+      where: { id: sessionId },
+    });
+    if (!credential || !session || credential.userId !== session.userId)
+      throw new BadRequestException({
+        error: {
+          code: "PASSKEY_VERIFICATION_FAILED",
+          message: "Passkey verification failed.",
+        },
+      });
+    const verification = await verifyAuthenticationResponse({
+      response: response as never,
+      expectedChallenge: challenge.challenge,
+      expectedOrigin: this.origin,
+      expectedRPID: this.rpId,
+      requireUserVerification: true,
+      credential: {
+        id: credential.credentialId,
+        publicKey: credential.publicKey,
+        counter: Number(credential.counter),
+        transports: credential.transports as never,
+      },
+    });
+    if (!verification.verified)
+      throw new BadRequestException({
+        error: {
+          code: "PASSKEY_VERIFICATION_FAILED",
+          message: "Passkey verification failed.",
+        },
+      });
+    await this.prisma.passkeyCredential.update({
+      where: { id: credential.id },
+      data: {
+        counter: BigInt(verification.authenticationInfo.newCounter),
+        lastUsedAt: new Date(),
+      },
+    });
+    await this.sessions.markStepUp(sessionId);
+  }
+
   async verifyAuthentication(
     challengeId: string,
     response: { id?: string } & Record<string, unknown>,

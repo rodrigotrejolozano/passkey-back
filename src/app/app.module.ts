@@ -8,6 +8,7 @@ import { DatabaseModule } from "../database/database.module";
 import { EmailModule } from "../email/email.module";
 import { RateLimitModule } from "../rate-limit/rate-limit.module";
 import { SecurityModule } from "../security/security.module";
+import { StepUpModule } from "../step-up/step-up.module";
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { SecurityModule } from "../security/security.module";
     RateLimitModule,
     AuthModule,
     SecurityModule,
+    StepUpModule,
   ],
   controllers: [AppController],
 })
