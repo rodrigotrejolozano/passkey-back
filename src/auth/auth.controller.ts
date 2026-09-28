@@ -44,7 +44,20 @@ export class AuthController {
       typeof request.query.state === "string" ? request.query.state : "";
     const code =
       typeof request.query.code === "string" ? request.query.code : "";
-    const result = await this.google.complete(state, code);
+    const recoveryToken = request.cookies?.passkey_recovery as
+      string | undefined;
+    let result;
+    try {
+      result = await this.google.complete(state, code, recoveryToken);
+    } catch (cause) {
+      if (recoveryToken) {
+        response.redirect(
+          `${process.env.FRONTEND_ORIGIN ?? "http://localhost:3000"}/auth/result?status=error&flow=recovery`,
+        );
+        return;
+      }
+      throw cause;
+    }
     this.setSessionCookie(response, result.token);
     if (result.purpose === OAuthTransactionPurpose.RECOVERY_RESTORE) {
       response.clearCookie("passkey_recovery", {

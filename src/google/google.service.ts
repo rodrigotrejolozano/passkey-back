@@ -5,6 +5,7 @@ import {
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { OAuth2Client } from "google-auth-library";
+import { createHmac } from "node:crypto";
 
 import { RandomSource } from "../common/random-source";
 import { PrismaService } from "../database/prisma.service";
@@ -57,6 +58,7 @@ export class GoogleService {
   async complete(
     state: string,
     code: string,
+    recoveryToken?: string,
   ): Promise<{
     token: string;
     isNewAccount: boolean;
@@ -130,13 +132,18 @@ export class GoogleService {
       };
     }
     if (transaction.purpose === OAuthTransactionPurpose.RECOVERY_RESTORE) {
-      if (!transaction.userId || !transaction.recoverySessionId)
+      if (
+        !transaction.userId ||
+        !transaction.recoverySessionId ||
+        !recoveryToken
+      )
         throw this.invalidTransaction();
       const token = await this.prisma.$transaction(async (database) => {
         const recoverySession = await database.recoverySession.updateMany({
           where: {
             id: transaction.recoverySessionId!,
             userId: transaction.userId!,
+            tokenHash: this.hash(recoveryToken),
             consumedAt: null,
             revokedAt: null,
             expiresAt: { gt: new Date() },
@@ -216,6 +223,14 @@ export class GoogleService {
   }
   private get redirectUri(): string {
     return this.config.getOrThrow<string>("GOOGLE_REDIRECT_URI");
+  }
+  private hash(value: string): string {
+    return createHmac(
+      "sha256",
+      this.config.getOrThrow<string>("SESSION_SECRET"),
+    )
+      .update(value)
+      .digest("base64url");
   }
   private invalidTransaction() {
     return new BadRequestException({

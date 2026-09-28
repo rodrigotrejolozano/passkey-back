@@ -5,6 +5,7 @@ import { ChallengesModule } from "../challenges/challenges.module";
 import { DatabaseModule } from "../database/database.module";
 import { EmailModule } from "../email/email.module";
 import { GoogleModule } from "../google/google.module";
+import { RateLimitModule } from "../rate-limit/rate-limit.module";
 import { SessionsModule } from "../sessions/sessions.module";
 import { RecoveryController } from "./recovery.controller";
 import { PublicRecoveryController } from "./public-recovery.controller";
@@ -17,6 +18,7 @@ import { RecoveryService } from "./recovery.service";
     ChallengesModule,
     EmailModule,
     GoogleModule,
+    RateLimitModule,
     SessionsModule,
   ],
   controllers: [RecoveryController, PublicRecoveryController],

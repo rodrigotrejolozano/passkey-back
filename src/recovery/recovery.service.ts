@@ -77,8 +77,7 @@ export class RecoveryService {
         expiresAt: { gt: new Date() },
       },
     });
-    if (!challenge || this.hash(code) !== challenge.secretHash)
-      throw this.invalidCode();
+    if (!challenge) throw this.invalidCode();
     const existing = await this.prisma.recoveryEmail.findUnique({
       where: { normalizedEmail: challenge.normalizedTargetEmail },
       select: { userId: true },
@@ -92,10 +91,15 @@ export class RecoveryService {
       });
     }
     const consumed = await this.prisma.emailChallenge.updateMany({
-      where: { id: challenge.id, consumedAt: null },
+      where: {
+        id: challenge.id,
+        consumedAt: null,
+        expiresAt: { gt: new Date() },
+      },
       data: { consumedAt: new Date() },
     });
     if (consumed.count !== 1) throw this.invalidCode();
+    if (this.hash(code) !== challenge.secretHash) throw this.invalidCode();
     await this.prisma.recoveryEmail.upsert({
       where: { userId },
       create: {
@@ -122,8 +126,7 @@ export class RecoveryService {
         expiresAt: { gt: new Date() },
       },
     });
-    if (!challenge?.userId || this.hash(token) !== challenge.secretHash)
-      throw this.invalidCode();
+    if (!challenge?.userId) throw this.invalidCode();
     const existing = await this.prisma.recoveryEmail.findUnique({
       where: { normalizedEmail: challenge.normalizedTargetEmail },
       select: { userId: true },
@@ -132,10 +135,15 @@ export class RecoveryService {
       throw this.invalidCode();
     await this.prisma.$transaction(async (transaction) => {
       const consumed = await transaction.emailChallenge.updateMany({
-        where: { id: challenge.id, consumedAt: null },
+        where: {
+          id: challenge.id,
+          consumedAt: null,
+          expiresAt: { gt: new Date() },
+        },
         data: { consumedAt: new Date() },
       });
       if (consumed.count !== 1) throw this.invalidCode();
+      if (this.hash(token) !== challenge.secretHash) return;
       await transaction.recoveryEmail.upsert({
         where: { userId: challenge.userId! },
         create: {
@@ -151,6 +159,7 @@ export class RecoveryService {
         },
       });
     });
+    if (this.hash(token) !== challenge.secretHash) throw this.invalidCode();
   }
 
   async removeRecoveryEmail(userId: string) {
@@ -191,11 +200,13 @@ export class RecoveryService {
       deliveryMethod === EmailDeliveryMethod.OTP
         ? `Your recovery code is ${secret}. It expires in 5 minutes.`
         : `Use this secure link to continue account recovery:\n\n${this.magicLink("/api/recovery/email/verify-link", challenge.id, secret)}\n\nThis link expires in 5 minutes and can only be used once. It does not sign you in.`;
-    await this.email.send({
-      to: recoveryEmail.email,
-      subject: "Recover your account",
-      text,
-    });
+    await this.email
+      .send({
+        to: recoveryEmail.email,
+        subject: "Recover your account",
+        text,
+      })
+      .catch(() => undefined);
   }
 
   async verifyPublicRecovery(email: string, code: string): Promise<string> {
@@ -209,13 +220,17 @@ export class RecoveryService {
       },
       orderBy: { createdAt: "desc" },
     });
-    if (!challenge?.userId || this.hash(code) !== challenge.secretHash)
-      throw this.invalidCode();
+    if (!challenge?.userId) throw this.invalidCode();
     const consumed = await this.prisma.emailChallenge.updateMany({
-      where: { id: challenge.id, consumedAt: null },
+      where: {
+        id: challenge.id,
+        consumedAt: null,
+        expiresAt: { gt: new Date() },
+      },
       data: { consumedAt: new Date() },
     });
     if (consumed.count !== 1) throw this.invalidCode();
+    if (this.hash(code) !== challenge.secretHash) throw this.invalidCode();
     return this.createRecoverySession(challenge.userId);
   }
 
@@ -232,13 +247,17 @@ export class RecoveryService {
         expiresAt: { gt: new Date() },
       },
     });
-    if (!challenge?.userId || this.hash(token) !== challenge.secretHash)
-      throw this.invalidCode();
+    if (!challenge?.userId) throw this.invalidCode();
     const consumed = await this.prisma.emailChallenge.updateMany({
-      where: { id: challenge.id, consumedAt: null },
+      where: {
+        id: challenge.id,
+        consumedAt: null,
+        expiresAt: { gt: new Date() },
+      },
       data: { consumedAt: new Date() },
     });
     if (consumed.count !== 1) throw this.invalidCode();
+    if (this.hash(token) !== challenge.secretHash) throw this.invalidCode();
     return this.createRecoverySession(challenge.userId);
   }
 
@@ -347,7 +366,12 @@ export class RecoveryService {
       verification.registrationInfo;
     return this.prisma.$transaction(async (transaction) => {
       const consumed = await transaction.recoverySession.updateMany({
-        where: { id: recoverySession.id, consumedAt: null },
+        where: {
+          id: recoverySession.id,
+          consumedAt: null,
+          revokedAt: null,
+          expiresAt: { gt: new Date() },
+        },
         data: { consumedAt: new Date() },
       });
       if (consumed.count !== 1) throw this.invalidCode();

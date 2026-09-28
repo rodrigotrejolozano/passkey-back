@@ -24,6 +24,7 @@ import {
   OAuthTransactionPurpose,
 } from "../generated/prisma/client";
 import { GoogleService } from "../google/google.service";
+import { RateLimitService } from "../rate-limit/rate-limit.service";
 import { RecoverySessionGuard } from "./recovery-session.guard";
 import { RecoveryService } from "./recovery.service";
 
@@ -52,19 +53,33 @@ export class PublicRecoveryController {
     private readonly recovery: RecoveryService,
     private readonly google: GoogleService,
     private readonly config: ConfigService,
+    private readonly rateLimit: RateLimitService,
   ) {}
 
   @Post("request")
-  async request(@Body() body: PublicRecoveryDto) {
+  async request(@Req() request: Request, @Body() body: PublicRecoveryDto) {
+    await this.rateLimit.assertAllowed(
+      "recovery-request",
+      request.ip ?? "unknown",
+      5,
+      300,
+    );
     await this.recovery.requestPublicRecovery(body.email, body.deliveryMethod);
     return { data: { accepted: true } };
   }
 
   @Post("verify")
   async verify(
+    @Req() request: Request,
     @Body() body: PublicRecoveryVerifyDto,
     @Res({ passthrough: true }) response: Response,
   ) {
+    await this.rateLimit.assertAllowed(
+      "recovery-verify",
+      request.ip ?? "unknown",
+      10,
+      300,
+    );
     const token = await this.recovery.verifyPublicRecovery(
       body.email,
       body.code,
@@ -75,9 +90,16 @@ export class PublicRecoveryController {
 
   @Post("code")
   async code(
+    @Req() request: Request,
     @Body() body: RecoveryCodeDto,
     @Res({ passthrough: true }) response: Response,
   ) {
+    await this.rateLimit.assertAllowed(
+      "recovery-code",
+      request.ip ?? "unknown",
+      10,
+      300,
+    );
     const token = await this.recovery.verifyRecoveryCode(body.code);
     this.setRecoveryCookie(response, token);
     return { data: { verified: true } };
@@ -121,19 +143,24 @@ export class PublicRecoveryController {
   }
 
   @Get("google/start")
-  @UseGuards(RecoverySessionGuard)
   async restoreGoogle(@Req() request: Request, @Res() response: Response) {
-    const recoverySession = await this.recovery.getActiveRecoverySession(
-      this.recoveryToken(request),
-    );
-    response.redirect(
-      await this.google.start(
-        OAuthTransactionPurpose.RECOVERY_RESTORE,
-        recoverySession.userId,
-        undefined,
-        recoverySession.id,
-      ),
-    );
+    try {
+      const recoverySession = await this.recovery.getActiveRecoverySession(
+        this.recoveryToken(request),
+      );
+      response.redirect(
+        await this.google.start(
+          OAuthTransactionPurpose.RECOVERY_RESTORE,
+          recoverySession.userId,
+          undefined,
+          recoverySession.id,
+        ),
+      );
+    } catch {
+      response.redirect(
+        `${this.frontendOrigin}/auth/result?status=error&flow=recovery`,
+      );
+    }
   }
 
   @Get("email/verify-link")
