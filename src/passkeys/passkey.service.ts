@@ -115,6 +115,86 @@ export class PasskeyService {
     return { challengeId: challenge.id, options };
   }
 
+  async addOptions(sessionId: string, userId: string) {
+    const existing = await this.prisma.passkeyCredential.findMany({
+      where: { userId },
+      select: { credentialId: true, transports: true },
+    });
+    const options = await generateRegistrationOptions({
+      rpID: this.rpId,
+      rpName: this.rpName,
+      userID: randomBytes(32),
+      userName: userId,
+      userDisplayName: "Passwordless user",
+      excludeCredentials: existing.map((credential) => ({
+        id: credential.credentialId,
+        transports: credential.transports as never,
+      })),
+      authenticatorSelection: {
+        residentKey: "required",
+        userVerification: "required",
+      },
+    });
+    const challenge = await this.challenges.create({
+      challenge: options.challenge,
+      type: WebAuthnChallengeType.REGISTRATION,
+      userId,
+      sessionId,
+      expiresAt: this.challengeExpiry,
+    });
+    return { challengeId: challenge.id, options };
+  }
+
+  async verifyAddedPasskey(
+    challengeId: string,
+    sessionId: string,
+    userId: string,
+    response: unknown,
+  ): Promise<void> {
+    const challenge = await this.challenges.consume(challengeId, new Date());
+    if (
+      challenge?.type !== WebAuthnChallengeType.REGISTRATION ||
+      challenge.userId !== userId ||
+      challenge.sessionId !== sessionId
+    ) {
+      throw new BadRequestException({
+        error: {
+          code: "CHALLENGE_INVALID",
+          message: "This passkey request is no longer valid.",
+        },
+      });
+    }
+    const verification = await verifyRegistrationResponse({
+      response: response as never,
+      expectedChallenge: challenge.challenge,
+      expectedOrigin: this.origin,
+      expectedRPID: this.rpId,
+      requireUserVerification: true,
+    });
+    if (!verification.verified || !verification.registrationInfo) {
+      throw new BadRequestException({
+        error: {
+          code: "PASSKEY_VERIFICATION_FAILED",
+          message: "Passkey verification failed.",
+        },
+      });
+    }
+    const { credential, credentialDeviceType, credentialBackedUp } =
+      verification.registrationInfo;
+    await this.prisma.passkeyCredential.create({
+      data: {
+        userId,
+        credentialId: credential.id,
+        publicKey: credential.publicKey,
+        counter: BigInt(credential.counter),
+        transports: credential.transports ?? [],
+        deviceType: credentialDeviceType,
+        backedUp: credentialBackedUp,
+        name: "New passkey",
+      },
+    });
+  }
+
   async stepUpOptions(sessionId: string, userId: string) {
     const credentials = await this.prisma.passkeyCredential.findMany({
       where: { userId },

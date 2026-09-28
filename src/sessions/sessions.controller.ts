@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Req } from "@nestjs/common";
+import { Controller, Delete, Get, Param, Post, Req } from "@nestjs/common";
 import type { Request } from "express";
 
 import { SessionService } from "./session.service";
@@ -22,6 +22,13 @@ export class SessionsController {
   async revokeOthers(@Req() request: Request) {
     const current = await this.current(request);
     await this.sessions.revokeOthers(current.userId, current.id);
+    return { data: { revoked: true } };
+  }
+
+  @Delete(":id")
+  async revoke(@Req() request: Request, @Param("id") id: string) {
+    const current = await this.current(request);
+    await this.sessions.revokeById(current.userId, id);
     return { data: { revoked: true } };
   }
 

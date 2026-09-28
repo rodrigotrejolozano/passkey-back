@@ -1,14 +1,38 @@
-import { Controller, Get, Req } from "@nestjs/common";
-import type { Request } from "express";
+import {
+  Body,
+  ConflictException,
+  Controller,
+  Delete,
+  Get,
+  Post,
+  Req,
+  Res,
+} from "@nestjs/common";
+import { IsNotEmpty, IsObject, IsString } from "class-validator";
+import type { Request, Response } from "express";
 
 import { PrismaService } from "../database/prisma.service";
+import { GoogleService } from "../google/google.service";
+import { OAuthTransactionPurpose } from "../generated/prisma/client";
+import { PasskeyService } from "../passkeys/passkey.service";
 import { SessionService } from "../sessions/session.service";
+
+class VerifyPasskeyDto {
+  @IsString()
+  @IsNotEmpty()
+  challengeId!: string;
+
+  @IsObject()
+  response!: Record<string, unknown>;
+}
 
 @Controller("security")
 export class SecurityController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly sessions: SessionService,
+    private readonly passkeysService: PasskeyService,
+    private readonly google: GoogleService,
   ) {}
 
   @Get("passkeys")
@@ -29,14 +53,99 @@ export class SecurityController {
     return { data: { passkeys } };
   }
 
+  @Post("passkeys/options")
+  async addPasskeyOptions(@Req() request: Request) {
+    const session = await this.currentSession(request);
+    await this.sessions.requireStepUp(session.id);
+    return {
+      data: await this.passkeysService.addOptions(session.id, session.userId),
+    };
+  }
+
+  @Post("passkeys/verify")
+  async addPasskeyVerify(
+    @Req() request: Request,
+    @Body() body: VerifyPasskeyDto,
+  ) {
+    const session = await this.currentSession(request);
+    await this.sessions.requireStepUp(session.id);
+    await this.passkeysService.verifyAddedPasskey(
+      body.challengeId,
+      session.id,
+      session.userId,
+      body.response,
+    );
+    return { data: { added: true } };
+  }
+
+  @Delete("passkeys/:id")
+  async removePasskey(@Req() request: Request) {
+    const session = await this.currentSession(request);
+    await this.sessions.requireStepUp(session.id);
+    await this.withMultipleMethods(session.userId, async (transaction) => {
+      await transaction.passkeyCredential.deleteMany({
+        where: { id: String(request.params.id), userId: session.userId },
+      });
+    });
+    return { data: { removed: true } };
+  }
+
   @Get("google")
-  async google(@Req() request: Request) {
+  async googleStatus(@Req() request: Request) {
     const session = await this.currentSession(request);
     const identity = await this.prisma.externalIdentity.findFirst({
       where: { userId: session.userId, provider: "GOOGLE" },
       select: { providerEmail: true, createdAt: true },
     });
     return { data: { identity } };
+  }
+
+  @Get("google/connect")
+  async connectGoogle(@Req() request: Request, @Res() response: Response) {
+    const session = await this.currentSession(request);
+    await this.sessions.requireStepUp(session.id);
+    response.redirect(
+      await this.google.start(
+        OAuthTransactionPurpose.LINK,
+        session.userId,
+        session.id,
+      ),
+    );
+  }
+
+  @Delete("google")
+  async disconnectGoogle(@Req() request: Request) {
+    const session = await this.currentSession(request);
+    await this.sessions.requireStepUp(session.id);
+    await this.withMultipleMethods(session.userId, async (transaction) => {
+      await transaction.externalIdentity.deleteMany({
+        where: { userId: session.userId, provider: "GOOGLE" },
+      });
+    });
+    return { data: { disconnected: true } };
+  }
+
+  private async withMultipleMethods(
+    userId: string,
+    action: (transaction: PrismaService) => Promise<void>,
+  ) {
+    await this.prisma.$transaction(async (transaction) => {
+      await transaction.$queryRaw`SELECT id FROM "User" WHERE id = ${userId} FOR UPDATE`;
+      const methods = await Promise.all([
+        transaction.passkeyCredential.count({ where: { userId } }),
+        transaction.externalIdentity.count({
+          where: { userId, provider: "GOOGLE" },
+        }),
+      ]);
+      if (methods[0] + methods[1] <= 1)
+        throw new ConflictException({
+          error: {
+            code: "LAST_AUTH_METHOD",
+            message: "You cannot remove your last sign-in method.",
+          },
+        });
+      await action(transaction as PrismaService);
+    });
   }
 
   private async currentSession(request: Request) {
