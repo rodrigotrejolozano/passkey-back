@@ -1,6 +1,6 @@
-import { Body, Controller, Delete, Get, Post, Req, Res } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Post, Req } from "@nestjs/common";
 import { IsEmail, IsNotEmpty, IsString } from "class-validator";
-import type { Request, Response } from "express";
+import type { Request } from "express";
 
 import { SessionService } from "../sessions/session.service";
 import { RecoveryService } from "./recovery.service";
@@ -12,13 +12,6 @@ class VerifyRecoveryEmailDto {
   @IsString() @IsNotEmpty() challengeId!: string;
   @IsString() @IsNotEmpty() code!: string;
 }
-class PublicRecoveryDto {
-  @IsEmail() email!: string;
-}
-class PublicRecoveryVerifyDto {
-  @IsEmail() email!: string;
-  @IsString() @IsNotEmpty() code!: string;
-}
 
 @Controller("security/recovery-email")
 export class RecoveryController {
@@ -26,30 +19,6 @@ export class RecoveryController {
     private readonly recovery: RecoveryService,
     private readonly sessions: SessionService,
   ) {}
-
-  @Post("/recovery/request")
-  async requestPublicRecovery(@Body() body: PublicRecoveryDto) {
-    await this.recovery.requestPublicRecovery(body.email);
-    return { data: { accepted: true } };
-  }
-
-  @Post("/recovery/verify")
-  async verifyPublicRecovery(
-    @Body() body: PublicRecoveryVerifyDto,
-    @Res({ passthrough: true }) response: Response,
-  ) {
-    const token = await this.recovery.verifyPublicRecovery(
-      body.email,
-      body.code,
-    );
-    response.cookie("passkey_recovery", token, {
-      httpOnly: true,
-      sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
-      path: "/",
-    });
-    return { data: { verified: true } };
-  }
 
   @Get()
   async get(@Req() request: Request) {
