@@ -155,6 +155,7 @@ model RecoverySession {
   id                String              @id @default(cuid())
   userId            String
   tokenHash         String              @unique
+  csrfTokenHash     String?
   expiresAt         DateTime
   consumedAt        DateTime?
   revokedAt         DateTime?

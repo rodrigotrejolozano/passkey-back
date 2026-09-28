@@ -8,6 +8,7 @@ import {
   Post,
   Req,
   Res,
+  UseGuards,
 } from "@nestjs/common";
 import { IsNotEmpty, IsObject, IsString } from "class-validator";
 import type { Request, Response } from "express";
@@ -17,6 +18,7 @@ import { GoogleService } from "../google/google.service";
 import { OAuthTransactionPurpose } from "../generated/prisma/client";
 import { PasskeyService } from "../passkeys/passkey.service";
 import { SessionService } from "../sessions/session.service";
+import { SessionCsrfGuard } from "./csrf.guard";
 
 class VerifyPasskeyDto {
   @IsString()
@@ -40,6 +42,7 @@ class RenamePasskeyDto {
 }
 
 @Controller("security")
+@UseGuards(SessionCsrfGuard)
 export class SecurityController {
   constructor(
     private readonly prisma: PrismaService,

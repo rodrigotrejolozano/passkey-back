@@ -7,6 +7,7 @@ import {
   Query,
   Req,
   Res,
+  UseGuards,
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import {
@@ -20,6 +21,7 @@ import type { Request, Response } from "express";
 
 import { EmailDeliveryMethod } from "../generated/prisma/client";
 import { SessionService } from "../sessions/session.service";
+import { SessionCsrfGuard } from "../security/csrf.guard";
 import { RecoveryService } from "./recovery.service";
 
 class RequestRecoveryEmailDto {
@@ -34,6 +36,7 @@ class VerifyRecoveryEmailDto {
 }
 
 @Controller("security/recovery-email")
+@UseGuards(SessionCsrfGuard)
 export class RecoveryController {
   constructor(
     private readonly recovery: RecoveryService,

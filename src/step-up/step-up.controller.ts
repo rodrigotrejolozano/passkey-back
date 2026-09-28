@@ -1,8 +1,9 @@
-import { Body, Controller, Post, Req } from "@nestjs/common";
+import { Body, Controller, Post, Req, UseGuards } from "@nestjs/common";
 import { IsNotEmpty, IsObject, IsString } from "class-validator";
 import type { Request } from "express";
 
 import { PasskeyService } from "../passkeys/passkey.service";
+import { SessionCsrfGuard } from "../security/csrf.guard";
 import { SessionService } from "../sessions/session.service";
 
 class VerifyStepUpDto {
@@ -11,6 +12,7 @@ class VerifyStepUpDto {
 }
 
 @Controller("step-up/passkey")
+@UseGuards(SessionCsrfGuard)
 export class StepUpController {
   constructor(
     private readonly passkeys: PasskeyService,

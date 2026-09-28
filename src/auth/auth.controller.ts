@@ -1,10 +1,20 @@
-import { Body, Controller, Get, Post, Req, Res } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Get,
+  Post,
+  Req,
+  Res,
+  UseGuards,
+} from "@nestjs/common";
 import { IsNotEmpty, IsObject, IsString, MaxLength } from "class-validator";
 import type { Request, Response } from "express";
 
 import { OAuthTransactionPurpose } from "../generated/prisma/client";
 import { GoogleService } from "../google/google.service";
 import { PasskeyService } from "../passkeys/passkey.service";
+import { SessionCsrfGuard } from "../security/csrf.guard";
+import { CsrfService } from "../security/csrf.service";
 import { SessionService } from "../sessions/session.service";
 
 class RegistrationOptionsDto {
@@ -29,6 +39,7 @@ export class AuthController {
     private readonly passkeys: PasskeyService,
     private readonly sessions: SessionService,
     private readonly google: GoogleService,
+    private readonly csrf: CsrfService,
   ) {}
 
   @Get("google/start")
@@ -132,7 +143,17 @@ export class AuthController {
     };
   }
 
+  @Get("csrf")
+  async csrfToken(@Req() request: Request) {
+    const token = request.cookies?.[this.sessions.cookieName] as
+      string | undefined;
+    return {
+      data: { csrfToken: await this.csrf.issueSessionToken(token ?? "") },
+    };
+  }
+
   @Post("logout")
+  @UseGuards(SessionCsrfGuard)
   async logout(
     @Req() request: Request,
     @Res({ passthrough: true }) response: Response,

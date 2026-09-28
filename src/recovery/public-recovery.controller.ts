@@ -25,6 +25,8 @@ import {
 } from "../generated/prisma/client";
 import { GoogleService } from "../google/google.service";
 import { RateLimitService } from "../rate-limit/rate-limit.service";
+import { RecoveryCsrfGuard } from "../security/csrf.guard";
+import { CsrfService } from "../security/csrf.service";
 import { RecoverySessionGuard } from "./recovery-session.guard";
 import { RecoveryService } from "./recovery.service";
 
@@ -54,6 +56,7 @@ export class PublicRecoveryController {
     private readonly google: GoogleService,
     private readonly config: ConfigService,
     private readonly rateLimit: RateLimitService,
+    private readonly csrf: CsrfService,
   ) {}
 
   @Post("request")
@@ -106,7 +109,7 @@ export class PublicRecoveryController {
   }
 
   @Post("restore/passkey/options")
-  @UseGuards(RecoverySessionGuard)
+  @UseGuards(RecoverySessionGuard, RecoveryCsrfGuard)
   async restorePasskeyOptions(@Req() request: Request) {
     return {
       data: await this.recovery.restorePasskeyOptions(
@@ -116,7 +119,7 @@ export class PublicRecoveryController {
   }
 
   @Post("restore/passkey/verify")
-  @UseGuards(RecoverySessionGuard)
+  @UseGuards(RecoverySessionGuard, RecoveryCsrfGuard)
   async restorePasskeyVerify(
     @Req() request: Request,
     @Body() body: RestorePasskeyDto,
@@ -140,6 +143,18 @@ export class PublicRecoveryController {
       path: "/",
     });
     return { data: { restored: true } };
+  }
+
+  @Get("csrf")
+  @UseGuards(RecoverySessionGuard)
+  async csrfToken(@Req() request: Request) {
+    return {
+      data: {
+        csrfToken: await this.csrf.issueRecoveryToken(
+          this.recoveryToken(request),
+        ),
+      },
+    };
   }
 
   @Get("google/start")

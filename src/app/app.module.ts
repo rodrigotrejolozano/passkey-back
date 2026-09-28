@@ -9,6 +9,7 @@ import { EmailModule } from "../email/email.module";
 import { RateLimitModule } from "../rate-limit/rate-limit.module";
 import { RecoveryModule } from "../recovery/recovery.module";
 import { SecurityModule } from "../security/security.module";
+import { CsrfModule } from "../security/csrf.module";
 import { StepUpModule } from "../step-up/step-up.module";
 
 @Module({
@@ -20,6 +21,7 @@ import { StepUpModule } from "../step-up/step-up.module";
     RateLimitModule,
     RecoveryModule,
     AuthModule,
+    CsrfModule,
     SecurityModule,
     StepUpModule,
   ],

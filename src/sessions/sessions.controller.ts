@@ -1,9 +1,19 @@
-import { Controller, Delete, Get, Param, Post, Req } from "@nestjs/common";
+import {
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Post,
+  Req,
+  UseGuards,
+} from "@nestjs/common";
 import type { Request } from "express";
 
+import { SessionCsrfGuard } from "../security/csrf.guard";
 import { SessionService } from "./session.service";
 
 @Controller("sessions")
+@UseGuards(SessionCsrfGuard)
 export class SessionsController {
   constructor(private readonly sessions: SessionService) {}
 
