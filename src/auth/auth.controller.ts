@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  HttpException,
   Post,
   Req,
   Res,
@@ -70,7 +71,7 @@ export class AuthController {
       string | undefined;
     const sessionToken = request.cookies?.[this.sessions.cookieName] as
       string | undefined;
-    const purpose = await this.google.getPurpose(state);
+    let purpose: OAuthTransactionPurpose | undefined;
     const stepUpSource =
       request.cookies?.passkey_step_up_source === "recovery"
         ? "recovery"
@@ -80,6 +81,7 @@ export class AuthController {
       string | undefined;
     let result;
     try {
+      purpose = await this.google.getPurpose(state);
       result = await this.google.complete(
         state,
         code,
@@ -95,24 +97,29 @@ export class AuthController {
         path: "/",
       });
       response.clearCookie("passkey_step_up_source", { path: "/" });
-      if (
-        purpose === OAuthTransactionPurpose.RECOVERY_RESTORE ||
-        purpose === OAuthTransactionPurpose.STEP_UP
-      ) {
-        const flow =
-          purpose === OAuthTransactionPurpose.RECOVERY_RESTORE
-            ? "recovery"
-            : "step-up";
-        const source =
-          purpose === OAuthTransactionPurpose.STEP_UP
-            ? `&source=${stepUpSource}`
-            : "";
-        response.redirect(
-          `${process.env.FRONTEND_ORIGIN ?? "http://localhost:3000"}/auth/result?status=error&flow=${flow}${source}`,
-        );
-        return;
-      }
-      throw cause;
+      const flow =
+        purpose === OAuthTransactionPurpose.RECOVERY_RESTORE
+          ? "recovery"
+          : purpose === OAuthTransactionPurpose.STEP_UP
+            ? "step-up"
+            : purpose === OAuthTransactionPurpose.LINK
+              ? "link"
+              : "auth";
+      const target = new URL(
+        "/auth/result",
+        process.env.FRONTEND_ORIGIN ?? "http://localhost:3000",
+      );
+      target.searchParams.set("status", "error");
+      target.searchParams.set("flow", flow);
+      if (purpose === OAuthTransactionPurpose.STEP_UP)
+        target.searchParams.set("source", stepUpSource);
+      const errorCode = this.errorCode(cause);
+      if (errorCode === "GOOGLE_ALREADY_LINKED")
+        target.searchParams.set("reason", "google-already-linked");
+      if (errorCode === "GOOGLE_STEP_UP_ACCOUNT_MISMATCH")
+        target.searchParams.set("reason", "google-account-mismatch");
+      response.redirect(target.toString());
+      return;
     }
     response.clearCookie(bindingCookieName, {
       httpOnly: true,
@@ -135,7 +142,9 @@ export class AuthController {
         ? "recovery"
         : result.purpose === OAuthTransactionPurpose.STEP_UP
           ? "step-up"
-          : "auth";
+          : result.purpose === OAuthTransactionPurpose.LINK
+            ? "link"
+            : "auth";
     const isNewAccount = result.isNewAccount ? "&new=1" : "";
     const source =
       result.purpose === OAuthTransactionPurpose.STEP_UP
@@ -144,6 +153,17 @@ export class AuthController {
     response.redirect(
       `${process.env.FRONTEND_ORIGIN ?? "http://localhost:3000"}/auth/result?status=success&flow=${flow}${isNewAccount}${source}`,
     );
+  }
+
+  private errorCode(cause: unknown): string | undefined {
+    if (!(cause instanceof HttpException)) return undefined;
+    const body = cause.getResponse();
+    if (typeof body !== "object" || body === null || !("error" in body))
+      return undefined;
+    const error = body.error;
+    if (typeof error !== "object" || error === null || !("code" in error))
+      return undefined;
+    return typeof error.code === "string" ? error.code : undefined;
   }
 
   @Post("passkey/registration/options")

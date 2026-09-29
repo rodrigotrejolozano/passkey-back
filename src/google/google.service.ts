@@ -132,8 +132,10 @@ export class GoogleService {
       throw this.invalidTransaction();
     const authTime = (claims as typeof claims & { auth_time?: unknown })
       .auth_time;
+    // Google can omit auth_time; prompt=login still forces provider reauthentication.
     if (
       transaction.purpose === OAuthTransactionPurpose.STEP_UP &&
+      authTime !== undefined &&
       (typeof authTime !== "number" || authTime * 1000 < Date.now() - 300_000)
     )
       throw this.invalidTransaction();
@@ -183,11 +185,16 @@ export class GoogleService {
       const session = await this.sessions.getActive(sessionToken);
       if (
         session.id !== transaction.sessionId ||
-        session.userId !== transaction.userId ||
-        !existing ||
-        existing.userId !== transaction.userId
+        session.userId !== transaction.userId
       )
         throw this.invalidTransaction();
+      if (!existing || existing.userId !== transaction.userId)
+        throw new ConflictException({
+          error: {
+            code: "GOOGLE_STEP_UP_ACCOUNT_MISMATCH",
+            message: "Use the Google account linked to this user.",
+          },
+        });
       await this.sessions.markStepUp(session.id);
       return {
         token: sessionToken,
