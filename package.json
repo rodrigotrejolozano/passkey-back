@@ -7,7 +7,7 @@
     "doc": "docs"
   },
   "scripts": {
-    "dev": "ts-node --transpile-only src/main.ts",
+    "dev": "node --watch -r ts-node/register/transpile-only src/main.ts",
     "start": "npm run build && node dist/main.js",
     "build": "npm run prisma:generate && tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
@@ -69,7 +69,7 @@
     "ts-jest": "^29.4.13",
     "ts-node": "^10.9.2",
     "tsx": "^4.23.15",
-    "typescript": "^5.9.3",
+    "typescript": "^6.0.3",
     "typescript-eslint": "^8.70.1"
   },
   "allowScripts": {

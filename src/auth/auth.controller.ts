@@ -10,6 +10,7 @@ import {
 } from "@nestjs/common";
 import { IsNotEmpty, IsObject, IsString, MaxLength } from "class-validator";
 import type { Request, Response } from "express";
+import type { PublicKeyCredentialCreationOptionsJSON } from "@simplewebauthn/server";
 
 import { OAuthTransactionPurpose } from "../generated/prisma/client";
 import { GoogleService } from "../google/google.service";
@@ -35,6 +36,13 @@ class VerifyPasskeyDto {
   @IsObject()
   response!: Record<string, unknown>;
 }
+
+type RegistrationOptionsResponse = {
+  data: {
+    challengeId: string;
+    options: PublicKeyCredentialCreationOptionsJSON;
+  };
+};
 
 @Controller("auth")
 export class AuthController {
@@ -129,6 +137,25 @@ export class AuthController {
     });
     response.clearCookie("passkey_step_up_source", { path: "/" });
     this.setSessionCookie(response, result.token);
+    if (result.purpose === OAuthTransactionPurpose.LOGIN_OR_SIGNUP) {
+      const destination = result.isNewAccount
+        ? "/security/recovery?onboarding=1"
+        : "/home";
+      response.redirect(
+        `${process.env.FRONTEND_ORIGIN ?? "http://localhost:3000"}${destination}`,
+      );
+      return;
+    }
+    if (result.purpose === OAuthTransactionPurpose.STEP_UP) {
+      const destination =
+        stepUpSource === "recovery"
+          ? "/security/recovery?stepUp=complete"
+          : "/security/sign-in?stepUp=complete";
+      response.redirect(
+        `${process.env.FRONTEND_ORIGIN ?? "http://localhost:3000"}${destination}`,
+      );
+      return;
+    }
     if (result.purpose === OAuthTransactionPurpose.RECOVERY_RESTORE) {
       response.clearCookie("passkey_recovery", {
         httpOnly: true,
@@ -140,18 +167,10 @@ export class AuthController {
     const flow =
       result.purpose === OAuthTransactionPurpose.RECOVERY_RESTORE
         ? "recovery"
-        : result.purpose === OAuthTransactionPurpose.STEP_UP
-          ? "step-up"
-          : result.purpose === OAuthTransactionPurpose.LINK
-            ? "link"
-            : "auth";
+        : "link";
     const isNewAccount = result.isNewAccount ? "&new=1" : "";
-    const source =
-      result.purpose === OAuthTransactionPurpose.STEP_UP
-        ? `&source=${stepUpSource}`
-        : "";
     response.redirect(
-      `${process.env.FRONTEND_ORIGIN ?? "http://localhost:3000"}/auth/result?status=success&flow=${flow}${isNewAccount}${source}`,
+      `${process.env.FRONTEND_ORIGIN ?? "http://localhost:3000"}/auth/result?status=success&flow=${flow}${isNewAccount}`,
     );
   }
 
@@ -170,7 +189,7 @@ export class AuthController {
   async registrationOptions(
     @Req() request: Request,
     @Body() body: RegistrationOptionsDto,
-  ) {
+  ): Promise<RegistrationOptionsResponse> {
     await this.limit("passkey-registration", request);
     return {
       data: await this.passkeys.registrationOptions(body.displayName.trim()),

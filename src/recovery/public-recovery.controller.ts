@@ -18,6 +18,7 @@ import {
   IsString,
 } from "class-validator";
 import type { Request, Response } from "express";
+import type { PublicKeyCredentialCreationOptionsJSON } from "@simplewebauthn/server";
 
 import {
   EmailDeliveryMethod,
@@ -48,6 +49,13 @@ class RestorePasskeyDto {
   @IsObject()
   response!: Record<string, unknown>;
 }
+
+type RestorePasskeyOptionsResponse = {
+  data: {
+    challengeId: string;
+    options: PublicKeyCredentialCreationOptionsJSON;
+  };
+};
 
 @Controller("recovery")
 export class PublicRecoveryController {
@@ -110,7 +118,9 @@ export class PublicRecoveryController {
 
   @Post("restore/passkey/options")
   @UseGuards(RecoverySessionGuard, RecoveryCsrfGuard)
-  async restorePasskeyOptions(@Req() request: Request) {
+  async restorePasskeyOptions(
+    @Req() request: Request,
+  ): Promise<RestorePasskeyOptionsResponse> {
     return {
       data: await this.recovery.restorePasskeyOptions(
         this.recoveryToken(request),
