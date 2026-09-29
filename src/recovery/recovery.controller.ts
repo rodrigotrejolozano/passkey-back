@@ -128,6 +128,17 @@ export class RecoveryController {
     };
   }
 
+  @Get("codes")
+  @UseGuards(SessionGuard)
+  async codesStatus(@Req() request: Request) {
+    const session = await this.current(request);
+    return {
+      data: {
+        configured: await this.recovery.hasActiveRecoveryCodes(session.userId),
+      },
+    };
+  }
+
   private async current(request: Request) {
     const token = request.cookies?.[this.sessions.cookieName] as
       string | undefined;

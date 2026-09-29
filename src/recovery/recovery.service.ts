@@ -315,6 +315,19 @@ export class RecoveryService {
     return codes.map((code) => code.display);
   }
 
+  async hasActiveRecoveryCodes(userId: string): Promise<boolean> {
+    return (
+      (await this.prisma.recoveryCode.count({
+        where: {
+          userId,
+          usedAt: null,
+          invalidatedAt: null,
+          expiresAt: { gt: new Date() },
+        },
+      })) > 0
+    );
+  }
+
   async verifyRecoveryCode(code: string): Promise<string> {
     const [lookupKey, secret, ...extra] = code
       .replace(/\s/g, "")
