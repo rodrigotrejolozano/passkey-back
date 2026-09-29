@@ -29,12 +29,21 @@ export class GoogleService {
     return `passkey_oauth_${state}`;
   }
 
+  localeCookieName(state: string): string {
+    return `passkey_oauth_locale_${state}`;
+  }
+
   async start(
     purpose: OAuthTransactionPurpose,
     userId?: string,
     sessionId?: string,
     recoverySessionId?: string,
-  ): Promise<{ url: string; bindingToken: string; cookieName: string }> {
+  ): Promise<{
+    state: string;
+    url: string;
+    bindingToken: string;
+    cookieName: string;
+  }> {
     const state = this.random.token();
     const nonce = this.random.token();
     const bindingToken = this.random.token();
@@ -64,6 +73,7 @@ export class GoogleService {
       url.searchParams.set("prompt", "select_account");
     }
     return {
+      state,
       url: url.toString(),
       bindingToken,
       cookieName: this.bindingCookieName(state),

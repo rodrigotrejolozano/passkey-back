@@ -4,6 +4,7 @@ import {
   Get,
   HttpException,
   Post,
+  Query,
   Req,
   Res,
   UseGuards,
@@ -12,6 +13,7 @@ import { IsNotEmpty, IsObject, IsString, MaxLength } from "class-validator";
 import type { Request, Response } from "express";
 import type { PublicKeyCredentialCreationOptionsJSON } from "@simplewebauthn/server";
 
+import { supportedLocale } from "../common/locale";
 import { OAuthTransactionPurpose } from "../generated/prisma/client";
 import { GoogleService } from "../google/google.service";
 import { PasskeyService } from "../passkeys/passkey.service";
@@ -55,7 +57,11 @@ export class AuthController {
   ) {}
 
   @Get("google/start")
-  async startGoogle(@Req() request: Request, @Res() response: Response) {
+  async startGoogle(
+    @Req() request: Request,
+    @Query("locale") locale: string | undefined,
+    @Res() response: Response,
+  ) {
     await this.limit("google-start", request);
     const transaction = await this.google.start(
       OAuthTransactionPurpose.LOGIN_OR_SIGNUP,
@@ -65,6 +71,7 @@ export class AuthController {
       transaction.cookieName,
       transaction.bindingToken,
     );
+    this.setLocaleCookie(response, transaction.state, supportedLocale(locale));
     response.redirect(transaction.url);
   }
 
@@ -85,6 +92,8 @@ export class AuthController {
         ? "recovery"
         : "sign-in";
     const bindingCookieName = this.google.bindingCookieName(state);
+    const localeCookieName = this.google.localeCookieName(state);
+    const locale = supportedLocale(request.cookies?.[localeCookieName]);
     const bindingToken = request.cookies?.[bindingCookieName] as
       string | undefined;
     let result;
@@ -104,6 +113,7 @@ export class AuthController {
         secure: process.env.NODE_ENV === "production",
         path: "/",
       });
+      response.clearCookie(localeCookieName, { path: "/" });
       response.clearCookie("passkey_step_up_source", { path: "/" });
       const flow =
         purpose === OAuthTransactionPurpose.RECOVERY_RESTORE
@@ -114,7 +124,7 @@ export class AuthController {
               ? "link"
               : "auth";
       const target = new URL(
-        "/auth/result",
+        `/${locale}/auth/result`,
         process.env.FRONTEND_ORIGIN ?? "http://localhost:3000",
       );
       target.searchParams.set("status", "error");
@@ -135,15 +145,14 @@ export class AuthController {
       secure: process.env.NODE_ENV === "production",
       path: "/",
     });
+    response.clearCookie(localeCookieName, { path: "/" });
     response.clearCookie("passkey_step_up_source", { path: "/" });
     this.setSessionCookie(response, result.token);
     if (result.purpose === OAuthTransactionPurpose.LOGIN_OR_SIGNUP) {
       const destination = result.isNewAccount
         ? "/security/recovery?onboarding=1"
         : "/home";
-      response.redirect(
-        `${process.env.FRONTEND_ORIGIN ?? "http://localhost:3000"}${destination}`,
-      );
+      response.redirect(this.frontendUrl(locale, destination));
       return;
     }
     if (result.purpose === OAuthTransactionPurpose.STEP_UP) {
@@ -151,9 +160,7 @@ export class AuthController {
         stepUpSource === "recovery"
           ? "/security/recovery?stepUp=complete"
           : "/security/sign-in?stepUp=complete";
-      response.redirect(
-        `${process.env.FRONTEND_ORIGIN ?? "http://localhost:3000"}${destination}`,
-      );
+      response.redirect(this.frontendUrl(locale, destination));
       return;
     }
     if (result.purpose === OAuthTransactionPurpose.RECOVERY_RESTORE) {
@@ -170,7 +177,10 @@ export class AuthController {
         : "link";
     const isNewAccount = result.isNewAccount ? "&new=1" : "";
     response.redirect(
-      `${process.env.FRONTEND_ORIGIN ?? "http://localhost:3000"}/auth/result?status=success&flow=${flow}${isNewAccount}`,
+      this.frontendUrl(
+        locale,
+        `/auth/result?status=success&flow=${flow}${isNewAccount}`,
+      ),
     );
   }
 
@@ -297,6 +307,24 @@ export class AuthController {
       path: "/",
       maxAge: 300_000,
     });
+  }
+
+  private setLocaleCookie(
+    response: Response,
+    state: string,
+    locale: "es" | "en",
+  ) {
+    response.cookie(this.google.localeCookieName(state), locale, {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      path: "/",
+      maxAge: 300_000,
+    });
+  }
+
+  private frontendUrl(locale: "es" | "en", path: string) {
+    return `${process.env.FRONTEND_ORIGIN ?? "http://localhost:3000"}/${locale}${path}`;
   }
 
   private limit(scope: string, request: Request, limit = 10): Promise<void> {

@@ -24,6 +24,7 @@ import {
   EmailDeliveryMethod,
   OAuthTransactionPurpose,
 } from "../generated/prisma/client";
+import { supportedLocale } from "../common/locale";
 import { GoogleService } from "../google/google.service";
 import { RateLimitService } from "../rate-limit/rate-limit.service";
 import { RecoveryCsrfGuard } from "../security/csrf.guard";
@@ -36,6 +37,9 @@ class PublicRecoveryDto {
   @IsOptional()
   @IsEnum(EmailDeliveryMethod)
   deliveryMethod?: EmailDeliveryMethod;
+  @IsOptional()
+  @IsString()
+  locale?: string;
 }
 class PublicRecoveryVerifyDto {
   @IsEmail() email!: string;
@@ -75,7 +79,11 @@ export class PublicRecoveryController {
       5,
       300,
     );
-    await this.recovery.requestPublicRecovery(body.email, body.deliveryMethod);
+    await this.recovery.requestPublicRecovery(
+      body.email,
+      body.deliveryMethod,
+      supportedLocale(body.locale),
+    );
     return { data: { accepted: true } };
   }
 
@@ -168,7 +176,12 @@ export class PublicRecoveryController {
   }
 
   @Get("google/start")
-  async restoreGoogle(@Req() request: Request, @Res() response: Response) {
+  async restoreGoogle(
+    @Req() request: Request,
+    @Query("locale") locale: string | undefined,
+    @Res() response: Response,
+  ) {
+    const selectedLocale = supportedLocale(locale);
     try {
       const recoverySession = await this.recovery.getActiveRecoverySession(
         this.recoveryToken(request),
@@ -186,10 +199,21 @@ export class PublicRecoveryController {
         path: "/",
         maxAge: 300_000,
       });
+      response.cookie(
+        this.google.localeCookieName(transaction.state),
+        selectedLocale,
+        {
+          httpOnly: true,
+          sameSite: "lax",
+          secure: process.env.NODE_ENV === "production",
+          path: "/",
+          maxAge: 300_000,
+        },
+      );
       response.redirect(transaction.url);
     } catch {
       response.redirect(
-        `${this.frontendOrigin}/auth/result?status=error&flow=recovery`,
+        `${this.frontendOrigin}/${selectedLocale}/auth/result?status=error&flow=recovery`,
       );
     }
   }
@@ -198,8 +222,10 @@ export class PublicRecoveryController {
   async verifyMagicLink(
     @Query("challengeId") challengeId: string,
     @Query("token") token: string,
+    @Query("locale") locale: string | undefined,
     @Res() response: Response,
   ) {
+    const selectedLocale = supportedLocale(locale);
     try {
       const recoveryToken = await this.recovery.verifyPublicRecoveryMagicLink(
         challengeId ?? "",
@@ -207,11 +233,11 @@ export class PublicRecoveryController {
       );
       this.setRecoveryCookie(response, recoveryToken);
       response.redirect(
-        `${this.frontendOrigin}/auth/result?status=success&flow=account-recovery`,
+        `${this.frontendOrigin}/${selectedLocale}/auth/result?status=success&flow=account-recovery`,
       );
     } catch {
       response.redirect(
-        `${this.frontendOrigin}/auth/result?status=error&flow=account-recovery`,
+        `${this.frontendOrigin}/${selectedLocale}/auth/result?status=error&flow=account-recovery`,
       );
     }
   }

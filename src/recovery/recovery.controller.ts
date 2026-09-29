@@ -20,6 +20,7 @@ import {
 import type { Request, Response } from "express";
 
 import { EmailDeliveryMethod } from "../generated/prisma/client";
+import { supportedLocale } from "../common/locale";
 import { SessionService } from "../sessions/session.service";
 import { SessionGuard } from "../sessions/session.guard";
 import { SessionCsrfGuard } from "../security/csrf.guard";
@@ -31,6 +32,9 @@ class RequestRecoveryEmailDto {
   @IsOptional()
   @IsEnum(EmailDeliveryMethod)
   deliveryMethod?: EmailDeliveryMethod;
+  @IsOptional()
+  @IsString()
+  locale?: string;
 }
 class VerifyRecoveryEmailDto {
   @IsString() @IsNotEmpty() challengeId!: string;
@@ -66,6 +70,7 @@ export class RecoveryController {
         session.userId,
         body.email,
         body.deliveryMethod,
+        supportedLocale(body.locale),
       ),
     };
   }
@@ -74,19 +79,21 @@ export class RecoveryController {
   async confirmMagicLink(
     @Query("challengeId") challengeId: string,
     @Query("token") token: string,
+    @Query("locale") locale: string | undefined,
     @Res() response: Response,
   ) {
+    const selectedLocale = supportedLocale(locale);
     try {
       await this.recovery.verifyRecoveryEmailMagicLink(
         challengeId ?? "",
         token ?? "",
       );
       response.redirect(
-        `${this.frontendOrigin}/auth/result?status=success&flow=recovery-email`,
+        `${this.frontendOrigin}/${selectedLocale}/auth/result?status=success&flow=recovery-email`,
       );
     } catch {
       response.redirect(
-        `${this.frontendOrigin}/auth/result?status=error&flow=recovery-email`,
+        `${this.frontendOrigin}/${selectedLocale}/auth/result?status=error&flow=recovery-email`,
       );
     }
   }

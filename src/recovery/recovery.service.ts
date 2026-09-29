@@ -43,6 +43,7 @@ export class RecoveryService {
     userId: string,
     email: string,
     deliveryMethod: EmailDeliveryMethod = EmailDeliveryMethod.OTP,
+    locale: "es" | "en" = "es",
   ) {
     const normalizedEmail = email.trim().toLowerCase();
     const secret =
@@ -63,7 +64,7 @@ export class RecoveryService {
     const text =
       deliveryMethod === EmailDeliveryMethod.OTP
         ? `Your verification code is ${secret}. It expires in 5 minutes.`
-        : `Use this secure link to verify your recovery email:\n\n${this.magicLink("/api/security/recovery-email/verification/link", challenge.id, secret)}\n\nThis link expires in 5 minutes and can only be used once.`;
+        : `Use this secure link to verify your recovery email:\n\n${this.magicLink("/api/security/recovery-email/verification/link", challenge.id, secret, locale)}\n\nThis link expires in 5 minutes and can only be used once.`;
     await this.email.send({
       to: email.trim(),
       subject: "Verify your recovery email",
@@ -184,6 +185,7 @@ export class RecoveryService {
   async requestPublicRecovery(
     email: string,
     deliveryMethod: EmailDeliveryMethod = EmailDeliveryMethod.OTP,
+    locale: "es" | "en" = "es",
   ): Promise<void> {
     const recoveryEmail = await this.prisma.recoveryEmail.findUnique({
       where: { normalizedEmail: email.trim().toLowerCase() },
@@ -207,7 +209,7 @@ export class RecoveryService {
     const text =
       deliveryMethod === EmailDeliveryMethod.OTP
         ? `Your recovery code is ${secret}. It expires in 5 minutes.`
-        : `Use this secure link to continue account recovery:\n\n${this.magicLink("/api/recovery/email/verify-link", challenge.id, secret)}\n\nThis link expires in 5 minutes and can only be used once. It does not sign you in.`;
+        : `Use this secure link to continue account recovery:\n\n${this.magicLink("/api/recovery/email/verify-link", challenge.id, secret, locale)}\n\nThis link expires in 5 minutes and can only be used once. It does not sign you in.`;
     await this.email
       .send({
         to: recoveryEmail.email,
@@ -515,13 +517,19 @@ export class RecoveryService {
     return token;
   }
 
-  private magicLink(path: string, challengeId: string, token: string): string {
+  private magicLink(
+    path: string,
+    challengeId: string,
+    token: string,
+    locale?: "es" | "en",
+  ): string {
     const url = new URL(
       path,
       this.config.get<string>("BACKEND_ORIGIN") ?? "http://localhost:3001",
     );
     url.searchParams.set("challengeId", challengeId);
     url.searchParams.set("token", token);
+    if (locale) url.searchParams.set("locale", locale);
     return url.toString();
   }
 

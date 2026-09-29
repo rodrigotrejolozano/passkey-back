@@ -6,6 +6,7 @@ import {
   Get,
   Patch,
   Post,
+  Query,
   Req,
   Res,
   UseGuards,
@@ -16,6 +17,7 @@ import type { Request, Response } from "express";
 import { PrismaService } from "../database/prisma.service";
 import { GoogleService } from "../google/google.service";
 import { OAuthTransactionPurpose } from "../generated/prisma/client";
+import { supportedLocale } from "../common/locale";
 import { PasskeyService } from "../passkeys/passkey.service";
 import { SessionService } from "../sessions/session.service";
 import { SessionGuard } from "../sessions/session.guard";
@@ -157,7 +159,11 @@ export class SecurityController {
 
   @Get("google/connect")
   @UseGuards(StepUpGuard)
-  async connectGoogle(@Req() request: Request, @Res() response: Response) {
+  async connectGoogle(
+    @Req() request: Request,
+    @Query("locale") locale: string | undefined,
+    @Res() response: Response,
+  ) {
     const session = await this.currentSession(request);
     await this.sessions.requireStepUp(session.id);
     const transaction = await this.google.start(
@@ -172,6 +178,17 @@ export class SecurityController {
       path: "/",
       maxAge: 300_000,
     });
+    response.cookie(
+      this.google.localeCookieName(transaction.state),
+      supportedLocale(locale),
+      {
+        httpOnly: true,
+        sameSite: "lax",
+        secure: process.env.NODE_ENV === "production",
+        path: "/",
+        maxAge: 300_000,
+      },
+    );
     response.redirect(transaction.url);
   }
 

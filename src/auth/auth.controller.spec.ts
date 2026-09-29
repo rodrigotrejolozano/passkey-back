@@ -12,6 +12,7 @@ describe("AuthController", () => {
     { cookieName: "passkey_session" } as never,
     {
       bindingCookieName: jest.fn(() => "passkey_oauth_state"),
+      localeCookieName: jest.fn(() => "passkey_oauth_locale_state"),
       complete,
       getPurpose,
     } as never,
@@ -25,8 +26,8 @@ describe("AuthController", () => {
   });
 
   it.each([
-    [false, "http://localhost:3000/home"],
-    [true, "http://localhost:3000/security/recovery?onboarding=1"],
+    [false, "http://localhost:3000/es/home"],
+    [true, "http://localhost:3000/es/security/recovery?onboarding=1"],
   ])(
     "redirects a %s Google account directly to its destination",
     async (isNewAccount, destination) => {
@@ -84,7 +85,36 @@ describe("AuthController", () => {
     );
 
     expect(response.redirect).toHaveBeenCalledWith(
-      "http://localhost:3000/security/sign-in?stepUp=complete",
+      "http://localhost:3000/es/security/sign-in?stepUp=complete",
+    );
+  });
+
+  it("keeps the requested English locale after a Google callback", async () => {
+    complete.mockResolvedValue({
+      token: "session-token",
+      isNewAccount: false,
+      purpose: OAuthTransactionPurpose.LOGIN_OR_SIGNUP,
+    });
+    const response = {
+      clearCookie: jest.fn(),
+      cookie: jest.fn(),
+      redirect: jest.fn(),
+    };
+
+    await controller.completeGoogle(
+      {
+        query: { state: "state", code: "code" },
+        cookies: {
+          passkey_oauth_state: "binding-token",
+          passkey_oauth_locale_state: "en",
+        },
+        ip: "127.0.0.1",
+      } as never,
+      response as never,
+    );
+
+    expect(response.redirect).toHaveBeenCalledWith(
+      "http://localhost:3000/en/home",
     );
   });
 });

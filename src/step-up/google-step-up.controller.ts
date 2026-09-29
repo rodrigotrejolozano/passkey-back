@@ -2,6 +2,7 @@ import { Controller, Get, Query, Req, Res, UseGuards } from "@nestjs/common";
 import type { Request, Response } from "express";
 
 import { OAuthTransactionPurpose } from "../generated/prisma/client";
+import { supportedLocale } from "../common/locale";
 import { GoogleService } from "../google/google.service";
 import { SessionGuard } from "../sessions/session.guard";
 import { SessionService } from "../sessions/session.service";
@@ -18,6 +19,7 @@ export class GoogleStepUpController {
   async start(
     @Req() request: Request,
     @Query("source") source: string,
+    @Query("locale") locale: string | undefined,
     @Res() response: Response,
   ) {
     const token =
@@ -35,6 +37,17 @@ export class GoogleStepUpController {
       path: "/",
       maxAge: 300_000,
     });
+    response.cookie(
+      this.google.localeCookieName(transaction.state),
+      supportedLocale(locale),
+      {
+        httpOnly: true,
+        sameSite: "lax",
+        secure: process.env.NODE_ENV === "production",
+        path: "/",
+        maxAge: 300_000,
+      },
+    );
     response.cookie(
       "passkey_step_up_source",
       source === "recovery" ? "recovery" : "sign-in",
